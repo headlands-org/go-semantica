@@ -4,25 +4,119 @@ package kernels
 import (
 	"fmt"
 	"math"
+	"sync"
 )
 
-// MatMulGGML performs matrix multiplication with ggml semantics
+// MatMulGGML performs matrix multiplication with ggml semantics (parallel version)
 // Matches ggml_mul_mat(weight, input) behavior
 // weight: [out_dim, in_dim], input: [batch, in_dim], output: [batch, out_dim]
 // This is equivalent to: output = input @ weight.T
 func MatMulGGML(dst, weight, input []float32, batch, inDim, outDim int) {
-	// output[i, j] = sum_k input[i, k] * weight[j, k]
-	// weight is [outDim, inDim], input is [batch, inDim], output is [batch, outDim]
+	// Zero output
+	for i := range dst[:batch*outDim] {
+		dst[i] = 0
+	}
 
-	for i := 0; i < batch; i++ {
-		for j := 0; j < outDim; j++ {
-			sum := float32(0)
-			for k := 0; k < inDim; k++ {
-				sum += input[i*inDim+k] * weight[j*inDim+k]
+	// Use parallel execution for large matrices
+	const parallelThreshold = 256
+	if outDim >= parallelThreshold {
+		matMulGGMLParallel(dst, weight, input, batch, inDim, outDim)
+	} else {
+		matMulGGMLSerial(dst, weight, input, batch, inDim, outDim)
+	}
+}
+
+// matMulGGMLSerial is the serial implementation
+func matMulGGMLSerial(dst, weight, input []float32, batch, inDim, outDim int) {
+	const blockSize = 32
+
+	for i0 := 0; i0 < batch; i0 += blockSize {
+		i1 := min(i0+blockSize, batch)
+		for j0 := 0; j0 < outDim; j0 += blockSize {
+			j1 := min(j0+blockSize, outDim)
+			for k0 := 0; k0 < inDim; k0 += blockSize {
+				k1 := min(k0+blockSize, inDim)
+
+				for i := i0; i < i1; i++ {
+					for j := j0; j < j1; j++ {
+						sum := float32(0)
+						inputBase := i * inDim
+						weightBase := j * inDim
+
+						for k := k0; k < k1; k++ {
+							sum += input[inputBase+k] * weight[weightBase+k]
+						}
+						dst[i*outDim+j] += sum
+					}
+				}
 			}
-			dst[i*outDim+j] = sum
 		}
 	}
+}
+
+// matMulGGMLParallel is the parallel implementation with more workers
+func matMulGGMLParallel(dst, weight, input []float32, batch, inDim, outDim int) {
+	const numWorkers = 16 // Increased for better parallelism on 24-core CPU
+	const blockSize = 16  // Smaller for better L1 cache utilization
+
+	chunkSize := (outDim + numWorkers - 1) / numWorkers
+	var wg sync.WaitGroup
+	wg.Add(numWorkers)
+
+	for w := 0; w < numWorkers; w++ {
+		j0Start := w * chunkSize
+		j0End := min(j0Start+chunkSize, outDim)
+
+		go func(j0Start, j0End int) {
+			defer wg.Done()
+
+			// Early exit if this worker has no work
+			if j0Start >= outDim {
+				return
+			}
+
+			for i0 := 0; i0 < batch; i0 += blockSize {
+				i1 := min(i0+blockSize, batch)
+				for j0 := j0Start; j0 < j0End; j0 += blockSize {
+					j1 := min(j0+blockSize, j0End)
+					for k0 := 0; k0 < inDim; k0 += blockSize {
+						k1 := min(k0+blockSize, inDim)
+
+						// Inner loops optimized for cache locality
+						for i := i0; i < i1; i++ {
+							inputBase := i * inDim
+							dstBase := i * outDim
+
+							for j := j0; j < j1; j++ {
+								sum := float32(0)
+								weightBase := j * inDim
+
+								// Unroll by 8 for better ILP
+								k := k0
+								for ; k+7 < k1; k += 8 {
+									sum += input[inputBase+k] * weight[weightBase+k]
+									sum += input[inputBase+k+1] * weight[weightBase+k+1]
+									sum += input[inputBase+k+2] * weight[weightBase+k+2]
+									sum += input[inputBase+k+3] * weight[weightBase+k+3]
+									sum += input[inputBase+k+4] * weight[weightBase+k+4]
+									sum += input[inputBase+k+5] * weight[weightBase+k+5]
+									sum += input[inputBase+k+6] * weight[weightBase+k+6]
+									sum += input[inputBase+k+7] * weight[weightBase+k+7]
+								}
+								// Handle remainder
+								for ; k < k1; k++ {
+									sum += input[inputBase+k] * weight[weightBase+k]
+								}
+								dst[dstBase+j] += sum
+							}
+						}
+					}
+				}
+			}
+		}(j0Start, j0End)
+	}
+
+	wg.Wait()
 }
 
 // MatMulF32 performs matrix multiplication: C = A * B
