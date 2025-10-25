@@ -47,6 +47,9 @@ type Model struct {
 	// Final normalization (Gemma-specific)
 	outputNormWeight []float32 // [embDim]
 
+	// RoPE cache for fast position embeddings
+	ropeCache *kernels.RoPECache
+
 	// Buffers for inference (reusable scratch space)
 	scratch []float32
 }
@@ -109,6 +112,11 @@ func LoadModel(path string) (*Model, error) {
 	// Size estimate: max_seq_len * embed_dim * 10 (conservative)
 	scratchSize := config.MaxSeqLen * config.EmbedDim * 10
 	model.scratch = make([]float32, scratchSize)
+
+	// Initialize RoPE cache if model uses RoPE
+	if config.UseRoPE {
+		model.ropeCache = kernels.NewRoPECache(config.HeadDim, config.RoPEBase, config.MaxSeqLen)
+	}
 
 	return model, nil
 }

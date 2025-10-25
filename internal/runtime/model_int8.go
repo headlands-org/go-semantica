@@ -331,8 +331,9 @@ func (m *Model) runAttentionINT8(output []float32, hiddenINT8 *kernels.Quantized
 		for i := range pos {
 			pos[i] = i
 		}
-		kernels.ApplyRoPE(q, seqLen, nHeads, headDim, pos, m.config.RoPEBase)
-		kernels.ApplyRoPE(k, seqLen, nKVHeads, headDim, pos, m.config.RoPEBase)
+		// Use cached RoPE for fast position embeddings
+		kernels.ApplyRoPECached(q, seqLen, nHeads, headDim, pos, m.ropeCache)
+		kernels.ApplyRoPECached(k, seqLen, nKVHeads, headDim, pos, m.ropeCache)
 	}
 
 	// For GQA, expand K, V
