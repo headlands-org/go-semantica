@@ -139,27 +139,47 @@ echo "hello world" | ./gemma-embed -model model.gguf -format json
 - [IMPLEMENTATION.md](IMPLEMENTATION.md) - Technical implementation details
 - [examples/](examples/) - Example programs
 
-## Performance (Gemma 300M Embeddings on Apple M1 Pro)
+## Performance
 
-Benchmarked against llama.cpp v0.0.3844 with the same model (embeddinggemma-300m-Q8_0.gguf, 313MB).
+Benchmarked with embeddinggemma-300m-Q8_0.gguf (314MB) model on two platforms.
 
-| Metric | llama.cpp | pure-go-llamas | Notes |
-|--------|-----------|----------------|-------|
-| **Model Load** | 340ms | 52ms | 6.5x faster with zero-copy mmap |
-| **First Inference** | 437ms | 103ms | 4.2x faster (cold start) |
-| **Warm Inference** | 350ms | 50ms | 7.0x faster (typical usage) |
-| **Peak Memory** | 410 MB | 173 MB | 2.4x less memory usage |
+### Apple M1 Pro (ARM64)
 
-**Test setup**: Single-threaded inference, "Hello world" input text, average of 10 runs after warmup.
+Comparison with llama.cpp v0.0.3844:
 
-### Why is it faster?
+| Metric | llama.cpp | pure-go-llamas | Speedup |
+|--------|-----------|----------------|---------|
+| **Model Load** | 340ms | 52ms | **6.5x faster** |
+| **First Inference** | 437ms | 103ms | **4.2x faster** |
+| **Warm Inference** | 350ms | 50ms | **7.0x faster** |
+| **Peak Memory** | 410 MB | 173 MB | **2.4x less** |
 
-1. **Zero-copy architecture**: Model weights are accessed directly via mmap with no copying
-2. **SIMD optimization**: Hand-written AVX2/NEON assembly for critical kernels
-3. **Minimal allocations**: Reused buffers and in-place operations
-4. **No Python overhead**: Pure Go binary with fast startup
+**Test setup**: NEON SIMD kernels, single-threaded, "Hello world" input, 10-run average.
 
-**Note**: These results are specific to Embedding Gemma on Apple Silicon. Performance on other platforms and model types will vary.
+### AMD Ryzen 9 7900 (x86-64, 12-core)
+
+Latest optimized build with INT8 scale pre-caching:
+
+| Metric | Time | Details |
+|--------|------|---------|
+| **Model Load** | 52ms | Zero-copy mmap |
+| **First Inference** | 76ms | Cold start with layer loading |
+| **Warm Inference** | 25ms | INT8 quantized with AVX2 SIMD |
+| **Peak Memory** | 425 MB | Zero-copy architecture (314MB model + 90MB tokenizer + 21MB runtime) |
+
+**Test setup**: AVX2 SIMD kernels, "Hello world" input (4 tokens), 10-run average after warmup.
+
+**Recent optimization**: Pre-caching Q8_0 scales reduced warm inference from 42ms to 25ms (**1.7x faster**, see [OPTIMIZATION_RESULTS.md](OPTIMIZATION_RESULTS.md)).
+
+### Why is it fast?
+
+1. **Zero-copy architecture**: Model weights accessed directly via mmap with no data copying
+2. **SIMD optimization**: Hand-written AVX2 (x86-64) and NEON (ARM64) assembly kernels
+3. **INT8 quantization**: Optimized Q8_0 matmul with pre-converted scales (eliminates float16 parsing)
+4. **Minimal allocations**: Reused buffers, in-place operations, unsafe zero-copy slice views
+5. **No Python overhead**: Pure Go binary with fast startup and low memory footprint
+
+**Note**: Performance varies by platform and model. ARM64 shows exceptional performance due to NEON optimization and efficient memory subsystem.
 
 ## Validation Results
 
