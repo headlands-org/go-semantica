@@ -4,6 +4,8 @@ package runtime
 
 import (
 	"testing"
+
+	"github.com/lth/pure-go-llamas/internal/gguf"
 )
 
 func TestDebugTokenEmbeddings(t *testing.T) {
@@ -20,13 +22,19 @@ func TestDebugTokenEmbeddings(t *testing.T) {
 	// Get token IDs
 	tokenIDs := []int{2, 9259, 1902, 1}
 	embDim := model.config.EmbedDim
+	bytesPerRow := ((embDim + 31) / 32) * 34
 
 	t.Log("Token embeddings (first 10 values):")
+	embedding := make([]float32, embDim)
 	for i, tokenID := range tokenIDs {
-		offset := tokenID * embDim
+		// Dequantize Q8_0 embedding on-the-fly
+		rowOffset := tokenID * bytesPerRow
+		rowData := model.tokenEmbedQ8[rowOffset : rowOffset+bytesPerRow]
+		gguf.DequantizeQ8_0Row(embedding, rowData, embDim)
+
 		t.Logf("Token %d (ID=%d):", i, tokenID)
 		for j := 0; j < 10; j++ {
-			t.Logf("  [%d] = %.6f", j, model.tokenEmbed[offset+j])
+			t.Logf("  [%d] = %.6f", j, embedding[j])
 		}
 	}
 
@@ -34,10 +42,14 @@ func TestDebugTokenEmbeddings(t *testing.T) {
 	scaleFactor := float32(27.71281)  // sqrt(768)
 	t.Logf("\nInput scaling factor: %.5f (sqrt(%d))", scaleFactor, embDim)
 
-	// Check first token embedding after scaling
-	t.Log("\nFirst token embedding after scaling (first 10 values):")
+	// Check token ID=2 embedding after scaling
+	rowOffset := 2 * bytesPerRow
+	rowData := model.tokenEmbedQ8[rowOffset : rowOffset+bytesPerRow]
+	gguf.DequantizeQ8_0Row(embedding, rowData, embDim)
+
+	t.Log("\nToken ID=2 embedding after scaling (first 10 values):")
 	for j := 0; j < 10; j++ {
-		scaled := model.tokenEmbed[2*embDim+j] * scaleFactor
+		scaled := embedding[j] * scaleFactor
 		t.Logf("  [%d] = %.6f", j, scaled)
 	}
 }
@@ -53,8 +65,14 @@ func TestDebugNormWeights(t *testing.T) {
 	}
 	defer model.Close()
 
-	// Check first layer normalization weights
-	layer := &model.layers[0]
+	// INT8 layers are loaded lazily - trigger load
+	_, err = model.ForwardINT8([]int{2})
+	if err != nil {
+		t.Fatalf("ForwardINT8 failed: %v", err)
+	}
+
+	// Check first layer normalization weights from INT8 layer
+	layer := model.layersINT8[0]
 
 	t.Log("Layer 0 attnNormWeight (first 10 values):")
 	for i := 0; i < 10; i++ {

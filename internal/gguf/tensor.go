@@ -150,6 +150,32 @@ func (it *Q8_0Iterator) Next() (Q8_0Block, bool) {
 	return block, true
 }
 
+// DequantizeQ8_0Row dequantizes a single row of Q8_0 data into dst
+// Used for on-the-fly token embedding lookup (zero-copy architecture)
+// rowData: Q8_0 bytes for this row (numCols/32 blocks * 34 bytes)
+// dst: pre-allocated float32 slice to write to (length numCols)
+func DequantizeQ8_0Row(dst []float32, rowData []byte, numCols int) {
+	blocksInRow := (numCols + 31) / 32
+	bytesPerBlock := 34
+
+	for blockIdx := 0; blockIdx < blocksInRow; blockIdx++ {
+		offset := blockIdx * bytesPerBlock
+		block := ParseQ8_0Block(rowData[offset : offset+bytesPerBlock])
+
+		// Determine how many elements in this block
+		blockStart := blockIdx * 32
+		blockEnd := blockStart + 32
+		if blockEnd > numCols {
+			blockEnd = numCols
+		}
+
+		// Dequantize directly into dst
+		for i := blockStart; i < blockEnd; i++ {
+			dst[i] = float32(block.Qs[i-blockStart]) * block.Scale
+		}
+	}
+}
+
 // DequantizeQ8_0 dequantizes an entire Q8_0 tensor to float32
 func DequantizeQ8_0(data []byte, numElems int) []float32 {
 	result := make([]float32, numElems)
