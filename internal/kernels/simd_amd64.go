@@ -24,6 +24,13 @@ func dotProductAVX2Asm(a, b *float32, n int) float32
 //go:noescape
 func dotProductINT8VNNI(a, b *int8, n int) int32
 
+// dotProductINT8Asm is the direct assembly call without dispatcher overhead
+// IMPORTANT: Caller must ensure slices are valid and n >= 16 for SIMD
+func dotProductINT8Asm(a, b *int8, n int) int32 {
+	// Direct call to AVX512 VNNI - no checks, no branches
+	return dotProductINT8VNNI(a, b, n)
+}
+
 // dotProductSIMD is the SIMD-accelerated version with runtime feature detection
 func dotProductSIMD(a, b []float32, n int) float32 {
 	if n == 0 {

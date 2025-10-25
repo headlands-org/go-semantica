@@ -374,9 +374,10 @@ func matMulQ8_0INT8Serial(dst []float32, weightData []byte, scales []float32, in
 				qsOffset := blockOffset + 2
 				blockStart := blockIdx * 32
 
-				inputSlice := input.Data[i*inDim+blockStart : i*inDim+blockStart+32]
-				weightSlice := unsafe.Slice((*int8)(unsafe.Pointer(&weightData[qsOffset])), 32)
-				blockSum := dotProductINT8SIMD(inputSlice, weightSlice, 32)
+				// Direct assembly call - bypass dispatcher overhead
+				inputPtr := (*int8)(unsafe.Pointer(&input.Data[i*inDim+blockStart]))
+				weightPtr := (*int8)(unsafe.Pointer(&weightData[qsOffset]))
+				blockSum := dotProductINT8Asm(inputPtr, weightPtr, 32)
 
 				sum += float32(blockSum) * scale * inputScale
 			}
@@ -440,10 +441,10 @@ func matMulQ8_0INT8Parallel(dst []float32, weightData []byte, scales []float32, 
 						qsOffset := blockOffset + 2
 						blockStart := blockIdx * 32
 
-						// Inline SIMD call for common case (32 elements)
-						inputSlice := input.Data[i*inDim+blockStart : i*inDim+blockStart+32]
-						weightSlice := unsafe.Slice((*int8)(unsafe.Pointer(&weightData[qsOffset])), 32)
-						blockSum := dotProductINT8SIMD(inputSlice, weightSlice, 32)
+						// Direct assembly call - bypass dispatcher overhead
+						inputPtr := (*int8)(unsafe.Pointer(&input.Data[i*inDim+blockStart]))
+						weightPtr := (*int8)(unsafe.Pointer(&weightData[qsOffset]))
+						blockSum := dotProductINT8Asm(inputPtr, weightPtr, 32)
 
 						sum += float32(blockSum) * scale * inputScale
 					}
