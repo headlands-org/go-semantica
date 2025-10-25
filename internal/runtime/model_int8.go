@@ -385,8 +385,8 @@ func (m *Model) runMLPINT8(output []float32, hiddenINT8 *kernels.QuantizedTensor
 	kernels.MatMulQ8_0INT8(gate, layer.gateWeightQ8, layer.gateWeightScales, hiddenINT8, seqLen, embDim, intermDim)
 	kernels.MatMulQ8_0INT8(up, layer.upWeightQ8, layer.upWeightScales, hiddenINT8, seqLen, embDim, intermDim)
 
-	// Apply GELU to gate (FP32)
-	kernels.GELU(gate, gate, seqLen*intermDim)
+	// Apply GELU to gate (FP32) - using fast approximation
+	kernels.GELUQuick(gate, gate, seqLen*intermDim)
 
 	// Element-wise multiply
 	kernels.VecMulF32(gate, gate, up, seqLen*intermDim)

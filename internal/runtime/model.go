@@ -641,8 +641,8 @@ func (m *Model) runMLP(hidden []float32, layer *Layer, seqLen int) {
 	kernels.MatMulGGML(gate, layer.gateWeight, hidden, seqLen, embDim, intermDim)
 	kernels.MatMulGGML(up, layer.upWeight, hidden, seqLen, embDim, intermDim)
 
-	// Apply GELU to gate
-	kernels.GELU(gate, gate, seqLen*intermDim)
+	// Apply GELU to gate - using fast approximation
+	kernels.GELUQuick(gate, gate, seqLen*intermDim)
 
 	// Element-wise multiply: gate * up
 	kernels.VecMulF32(gate, gate, up, seqLen*intermDim)
