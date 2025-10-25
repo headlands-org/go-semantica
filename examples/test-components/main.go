@@ -12,7 +12,8 @@ import (
 func main() {
 	modelPath := "../../models/All-MiniLM-L6-v2-Embedding-GGUF/all-MiniLM-L6-v2-Q8_0.gguf"
 
-	fmt.Println("=== Pure-Go GGUF Runtime Demo ===\n")
+	fmt.Println("=== Pure-Go GGUF Runtime Demo ===")
+	fmt.Println() // Empty line
 
 	// 1. Load GGUF model
 	fmt.Println("1. Loading GGUF model...")

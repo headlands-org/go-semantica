@@ -261,11 +261,20 @@ func (t *Tokenizer) tokenizeBPE(text string) []string {
 		if _, ok := t.tokenToID[token]; ok {
 			final = append(final, token)
 		} else {
-			// Token not in vocab, output as byte tokens
-			for _, b := range []byte(token) {
-				byteToken := t.vocab[int(b)+236000] // Byte tokens start at 236000
-				if byteToken != "" {
-					final = append(final, byteToken)
+			// Token not in vocab, try byte tokens or use UNK
+			hasByteTokens := len(t.vocab) > 236255 // Gemma models have byte tokens at 236000-236255
+			if hasByteTokens {
+				// Output as byte tokens (Gemma-style)
+				for _, b := range []byte(token) {
+					byteToken := t.vocab[int(b)+236000]
+					if byteToken != "" {
+						final = append(final, byteToken)
+					}
+				}
+			} else {
+				// No byte tokens available, use UNK token
+				if t.unkID >= 0 && t.unkID < len(t.vocab) {
+					final = append(final, t.vocab[t.unkID])
 				}
 			}
 		}
