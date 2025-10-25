@@ -5,15 +5,14 @@ import (
 	"os"
 	"unsafe"
 
-	"golang.org/x/exp/mmap"
+	mmap "github.com/edsrzf/mmap-go"
 )
 
 // Reader provides read access to a GGUF file via memory mapping
 type Reader struct {
 	path     string
 	file     *os.File
-	mmap     *mmap.ReaderAt
-	data     []byte
+	mmap     mmap.MMap // []byte view of the memory-mapped file
 	header   Header
 	metadata map[string]Metadata
 	tensors  map[string]*TensorDesc
@@ -37,33 +36,17 @@ func Open(path string) (*Reader, error) {
 		return nil, fmt.Errorf("open file: %w", err)
 	}
 
-	// Get file size
-	info, err := file.Stat()
-	if err != nil {
-		file.Close()
-		return nil, fmt.Errorf("stat file: %w", err)
-	}
-
-	// Memory-map the file
-	mmapReader, err := mmap.Open(path)
+	// Memory-map the file (this gives us a []byte view with zero-copy)
+	mmapData, err := mmap.Map(file, mmap.RDONLY, 0)
 	if err != nil {
 		file.Close()
 		return nil, fmt.Errorf("mmap file: %w", err)
 	}
 
-	// Create unsafe view of entire file
-	data := make([]byte, info.Size())
-	if _, err := mmapReader.ReadAt(data, 0); err != nil {
-		mmapReader.Close()
-		file.Close()
-		return nil, fmt.Errorf("read mmap: %w", err)
-	}
-
 	r := &Reader{
 		path:     path,
 		file:     file,
-		mmap:     mmapReader,
-		data:     data,
+		mmap:     mmapData,
 		metadata: make(map[string]Metadata),
 		tensors:  make(map[string]*TensorDesc),
 	}
@@ -81,7 +64,7 @@ func Open(path string) (*Reader, error) {
 func (r *Reader) Close() error {
 	var err error
 	if r.mmap != nil {
-		if e := r.mmap.Close(); e != nil {
+		if e := r.mmap.Unmap(); e != nil {
 			err = e
 		}
 	}
@@ -95,34 +78,37 @@ func (r *Reader) Close() error {
 
 // parse reads the GGUF header, metadata, and tensor info
 func (r *Reader) parse() error {
+	// The mmap []byte gives us direct access to the file
+	// We parse metadata from it without copying
+	data := r.mmap
 	offset := 0
 
 	// Read header
-	if len(r.data) < 24 {
+	if len(data) < 24 {
 		return fmt.Errorf("file too small for header")
 	}
 
-	r.header.Magic = byteOrder.Uint32(r.data[offset:])
+	r.header.Magic = byteOrder.Uint32(data[offset:])
 	offset += 4
 	if r.header.Magic != GGUFMagic {
 		return fmt.Errorf("invalid magic: 0x%08x", r.header.Magic)
 	}
 
-	r.header.Version = byteOrder.Uint32(r.data[offset:])
+	r.header.Version = byteOrder.Uint32(data[offset:])
 	offset += 4
 	if r.header.Version != GGUFVersion {
 		return fmt.Errorf("unsupported version: %d", r.header.Version)
 	}
 
-	r.header.TensorCount = byteOrder.Uint64(r.data[offset:])
+	r.header.TensorCount = byteOrder.Uint64(data[offset:])
 	offset += 8
 
-	r.header.MetadataKVSize = byteOrder.Uint64(r.data[offset:])
+	r.header.MetadataKVSize = byteOrder.Uint64(data[offset:])
 	offset += 8
 
 	// Read metadata key-value pairs
 	for i := uint64(0); i < r.header.MetadataKVSize; i++ {
-		md, n, err := r.readMetadata(offset)
+		md, n, err := r.readMetadata(data, offset)
 		if err != nil {
 			return fmt.Errorf("read metadata %d: %w", i, err)
 		}
@@ -132,7 +118,7 @@ func (r *Reader) parse() error {
 
 	// Read tensor info
 	for i := uint64(0); i < r.header.TensorCount; i++ {
-		ti, n, err := r.readTensorInfo(offset)
+		ti, n, err := r.readTensorInfo(data, offset)
 		if err != nil {
 			return fmt.Errorf("read tensor info %d: %w", i, err)
 		}
@@ -174,24 +160,38 @@ func (r *Reader) parse() error {
 	return nil
 }
 
+func min(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 // readMetadata reads a single metadata key-value pair
-func (r *Reader) readMetadata(offset int) (Metadata, int, error) {
+func (r *Reader) readMetadata(data []byte, offset int) (Metadata, int, error) {
 	start := offset
 	md := Metadata{}
 
 	// Read key (string)
-	keyLen := byteOrder.Uint64(r.data[offset:])
+	keyLen := byteOrder.Uint64(data[offset:])
 	offset += 8
-	md.Key = string(r.data[offset : offset+int(keyLen)])
+	md.Key = string(data[offset : offset+int(keyLen)])
 	offset += int(keyLen)
 
 	// Read value type
-	md.Type = MetadataValueType(byteOrder.Uint32(r.data[offset:]))
+	md.Type = MetadataValueType(byteOrder.Uint32(data[offset:]))
 	offset += 4
 
 	// Read value based on type
 	var err error
-	md.Value, offset, err = r.readMetadataValue(offset, md.Type)
+	md.Value, offset, err = r.readMetadataValue(data, offset, md.Type)
 	if err != nil {
 		return md, 0, err
 	}
@@ -200,49 +200,49 @@ func (r *Reader) readMetadata(offset int) (Metadata, int, error) {
 }
 
 // readMetadataValue reads a metadata value
-func (r *Reader) readMetadataValue(offset int, typ MetadataValueType) (interface{}, int, error) {
+func (r *Reader) readMetadataValue(data []byte, offset int, typ MetadataValueType) (interface{}, int, error) {
 	switch typ {
 	case MetadataUint8:
-		return r.data[offset], offset + 1, nil
+		return data[offset], offset + 1, nil
 	case MetadataInt8:
-		return int8(r.data[offset]), offset + 1, nil
+		return int8(data[offset]), offset + 1, nil
 	case MetadataUint16:
-		return byteOrder.Uint16(r.data[offset:]), offset + 2, nil
+		return byteOrder.Uint16(data[offset:]), offset + 2, nil
 	case MetadataInt16:
-		return int16(byteOrder.Uint16(r.data[offset:])), offset + 2, nil
+		return int16(byteOrder.Uint16(data[offset:])), offset + 2, nil
 	case MetadataUint32:
-		return byteOrder.Uint32(r.data[offset:]), offset + 4, nil
+		return byteOrder.Uint32(data[offset:]), offset + 4, nil
 	case MetadataInt32:
-		return int32(byteOrder.Uint32(r.data[offset:])), offset + 4, nil
+		return int32(byteOrder.Uint32(data[offset:])), offset + 4, nil
 	case MetadataFloat32:
-		bits := byteOrder.Uint32(r.data[offset:])
+		bits := byteOrder.Uint32(data[offset:])
 		return *(*float32)(unsafe.Pointer(&bits)), offset + 4, nil
 	case MetadataUint64:
-		return byteOrder.Uint64(r.data[offset:]), offset + 8, nil
+		return byteOrder.Uint64(data[offset:]), offset + 8, nil
 	case MetadataInt64:
-		return int64(byteOrder.Uint64(r.data[offset:])), offset + 8, nil
+		return int64(byteOrder.Uint64(data[offset:])), offset + 8, nil
 	case MetadataFloat64:
-		bits := byteOrder.Uint64(r.data[offset:])
+		bits := byteOrder.Uint64(data[offset:])
 		return *(*float64)(unsafe.Pointer(&bits)), offset + 8, nil
 	case MetadataBool:
-		return r.data[offset] != 0, offset + 1, nil
+		return data[offset] != 0, offset + 1, nil
 	case MetadataString:
-		strlen := byteOrder.Uint64(r.data[offset:])
+		strlen := byteOrder.Uint64(data[offset:])
 		offset += 8
-		str := string(r.data[offset : offset+int(strlen)])
+		str := string(data[offset : offset+int(strlen)])
 		return str, offset + int(strlen), nil
 	case MetadataArray:
 		// Read array type
-		arrType := MetadataValueType(byteOrder.Uint32(r.data[offset:]))
+		arrType := MetadataValueType(byteOrder.Uint32(data[offset:]))
 		offset += 4
 		// Read array length
-		arrLen := byteOrder.Uint64(r.data[offset:])
+		arrLen := byteOrder.Uint64(data[offset:])
 		offset += 8
 		// Read array elements
 		arr := make([]interface{}, arrLen)
 		for i := uint64(0); i < arrLen; i++ {
 			var err error
-			arr[i], offset, err = r.readMetadataValue(offset, arrType)
+			arr[i], offset, err = r.readMetadataValue(data, offset, arrType)
 			if err != nil {
 				return nil, offset, err
 			}
@@ -254,33 +254,33 @@ func (r *Reader) readMetadataValue(offset int, typ MetadataValueType) (interface
 }
 
 // readTensorInfo reads tensor information
-func (r *Reader) readTensorInfo(offset int) (TensorInfo, int, error) {
+func (r *Reader) readTensorInfo(data []byte, offset int) (TensorInfo, int, error) {
 	start := offset
 	ti := TensorInfo{}
 
 	// Read name
-	nameLen := byteOrder.Uint64(r.data[offset:])
+	nameLen := byteOrder.Uint64(data[offset:])
 	offset += 8
-	ti.Name = string(r.data[offset : offset+int(nameLen)])
+	ti.Name = string(data[offset : offset+int(nameLen)])
 	offset += int(nameLen)
 
 	// Read number of dimensions
-	ti.NDim = byteOrder.Uint32(r.data[offset:])
+	ti.NDim = byteOrder.Uint32(data[offset:])
 	offset += 4
 
 	// Read dimensions
 	ti.Dims = make([]uint64, ti.NDim)
 	for i := uint32(0); i < ti.NDim; i++ {
-		ti.Dims[i] = byteOrder.Uint64(r.data[offset:])
+		ti.Dims[i] = byteOrder.Uint64(data[offset:])
 		offset += 8
 	}
 
 	// Read dtype
-	ti.DType = DType(byteOrder.Uint32(r.data[offset:]))
+	ti.DType = DType(byteOrder.Uint32(data[offset:]))
 	offset += 4
 
 	// Read offset
-	ti.Offset = byteOrder.Uint64(r.data[offset:])
+	ti.Offset = byteOrder.Uint64(data[offset:])
 	offset += 8
 
 	return ti, offset - start, nil
@@ -311,6 +311,7 @@ func (r *Reader) ListTensors() []string {
 }
 
 // GetTensorData returns a view of the tensor data as a byte slice
+// The returned slice is a direct view into the memory-mapped file (zero-copy)
 func (r *Reader) GetTensorData(name string) ([]byte, error) {
 	desc, ok := r.tensors[name]
 	if !ok {
@@ -318,11 +319,14 @@ func (r *Reader) GetTensorData(name string) ([]byte, error) {
 	}
 
 	offset := r.dataOff + desc.Offset
-	if offset < 0 || offset+desc.Size > int64(len(r.data)) {
-		return nil, fmt.Errorf("tensor data out of bounds: %s", name)
+	end := offset + desc.Size
+	if offset < 0 || end > int64(len(r.mmap)) {
+		return nil, fmt.Errorf("tensor data out of bounds: %s (offset=%d size=%d fileSize=%d)",
+			name, offset, desc.Size, len(r.mmap))
 	}
 
-	return r.data[offset : offset+desc.Size], nil
+	// Return a zero-copy slice view directly into the mmap
+	return r.mmap[offset:end], nil
 }
 
 // Header returns the GGUF header
