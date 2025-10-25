@@ -8,7 +8,7 @@ import (
 	"github.com/lth/pure-go-llamas/internal/gguf"
 )
 
-const gemmaModelPath = "../../models/embeddinggemma-300m-GGUF/embeddinggemma-300m-Q8_0.gguf"
+const gemmaModelPath = "../../model/embeddinggemma-300m-Q8_0.gguf"
 
 func TestTokenizerDebug(t *testing.T) {
 	if testing.Short() {

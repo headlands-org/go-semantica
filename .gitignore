@@ -4,14 +4,15 @@ embeddinggemma-demo
 gemma-embed
 gguf-inspect
 simple
+test
 examples/test-components/test-components
 
 # Profile files
 *.prof
 *.pprof
 
-# Model files (large)
-models/
+# Model cache directories (models are now in Git LFS under model/)
+.cache/
 
 # Temporary files
 *.tmp

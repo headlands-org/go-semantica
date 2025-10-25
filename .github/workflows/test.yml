@@ -34,11 +34,9 @@ jobs:
 
       - name: Download Gemma model
         run: |
-          mkdir -p models/embeddinggemma-300m-GGUF
-          cd models/embeddinggemma-300m-GGUF
-          # Download from HuggingFace
-          wget -q https://huggingface.co/google/embeddinggemma-300m-GGUF/resolve/main/embeddinggemma-300m-Q8_0.gguf
-          ls -lh embeddinggemma-300m-Q8_0.gguf
+          # Model is now checked in via Git LFS, just need to pull it
+          git lfs pull --include="model/embeddinggemma-300m-Q8_0.gguf"
+          ls -lh model/embeddinggemma-300m-Q8_0.gguf
 
       - name: Run golden reference test
         run: |

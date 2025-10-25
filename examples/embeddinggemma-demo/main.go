@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	modelPath := "models/embeddinggemma-300m-GGUF/embeddinggemma-300m-Q8_0.gguf"
+	modelPath := "model/embeddinggemma-300m-Q8_0.gguf"
 
 	fmt.Println("╔════════════════════════════════════════════════════════════════╗")
 	fmt.Println("║          Pure-Go GGUF Runtime - EmbeddingGemma Demo           ║")
