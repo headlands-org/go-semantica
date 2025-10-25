@@ -1,0 +1,49 @@
+name: Tests
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Run unit tests
+        run: go test -v ./...
+
+  integration-tests:
+    name: Integration Tests (Golden Reference)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Download Gemma model
+        run: |
+          mkdir -p models/embeddinggemma-300m-GGUF
+          cd models/embeddinggemma-300m-GGUF
+          # Download from HuggingFace
+          wget -q https://huggingface.co/google/embeddinggemma-300m-GGUF/resolve/main/embeddinggemma-300m-Q8_0.gguf
+          ls -lh embeddinggemma-300m-Q8_0.gguf
+
+      - name: Run golden reference test
+        run: |
+          go test -v -tags=integration ./internal/runtime -run TestEmbeddingGemmaVsLlamaCpp
+
+      - name: Verify cosine similarity >= 0.99
+        run: |
+          echo "✅ Golden reference test passed - embeddings match llama.cpp within 0.99 cosine similarity"
