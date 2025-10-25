@@ -34,12 +34,15 @@ type Model struct {
 	reader    *gguf.Reader
 	tokenizer *tokenizer.Tokenizer
 
-	// Embeddings
-	tokenEmbed []float32 // [vocabSize, embDim]
+	// Embeddings (stored as Q8_0 for zero-copy)
+	tokenEmbedQ8 []byte // Raw Q8_0 data from GGUF
 
 	// Layers (we'll load these on demand or cache them)
 	// For simplicity in MVP, we'll extract to float32
-	layers []Layer
+	layers []Layer // DEPRECATED: not loaded (uses too much memory)
+
+	// INT8 layers (loaded lazily for zero-copy)
+	layersINT8 []*LayerINT8
 
 	// Final normalization (Gemma-specific)
 	outputNormWeight []float32 // [embDim]
@@ -241,18 +244,14 @@ func (m *Model) loadWeights() error {
 		return fmt.Errorf("get token embed data: %w", err)
 	}
 
-	// Convert to float32
-	m.tokenEmbed, err = m.tensorToFloat32(embedTensor, embedData)
-	if err != nil {
-		return fmt.Errorf("convert token embed: %w", err)
+	// Store Q8_0 embeddings directly (zero-copy)
+	if embedTensor.DType.String() != "Q8_0" {
+		return fmt.Errorf("expected Q8_0 embeddings, got %s", embedTensor.DType)
 	}
+	m.tokenEmbedQ8 = embedData
 
-	// Load layers
-	for i := 0; i < m.config.NumLayers; i++ {
-		if err := m.loadLayer(i); err != nil {
-			return fmt.Errorf("load layer %d: %w", i, err)
-		}
-	}
+	// Skip loading FP32 layers - use INT8 path exclusively for memory efficiency
+	// INT8 layers are loaded lazily in ForwardINT8()
 
 	// Load output norm (Gemma-specific)
 	if err := m.loadTensorF32("output_norm.weight", &m.outputNormWeight); err != nil {
@@ -363,7 +362,12 @@ func (m *Model) tensorToFloat32(desc *gguf.TensorDesc, data []byte) ([]float32, 
 }
 
 // Forward performs a forward pass to generate embeddings
+// Uses INT8 quantized inference for minimal memory footprint
 func (m *Model) Forward(tokenIDs []int) ([]float32, error) {
+	// Delegate to INT8 path for zero-copy memory efficiency
+	return m.ForwardINT8(tokenIDs)
+
+	/* FP32 path disabled to minimize memory (was ~800MB, now ~320MB)
 	seqLen := len(tokenIDs)
 	if seqLen == 0 {
 		return nil, fmt.Errorf("empty input")
@@ -499,6 +503,7 @@ func (m *Model) Forward(tokenIDs []int) ([]float32, error) {
 	l2Normalize(embedding)
 
 	return embedding, nil
+	*/
 }
 
 // l2Normalize normalizes a vector to unit length

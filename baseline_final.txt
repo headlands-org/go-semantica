@@ -1,0 +1,7 @@
+goos: linux
+goarch: amd64
+pkg: github.com/lth/pure-go-llamas/internal/runtime
+cpu: AMD Ryzen 9 7900 12-Core Processor             
+BenchmarkForwardINT8-24    	      10	  30193208 ns/op
+PASS
+ok  	github.com/lth/pure-go-llamas/internal/runtime	0.660s
