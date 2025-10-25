@@ -56,7 +56,7 @@ func matMulGGMLSerial(dst, weight, input []float32, batch, inDim, outDim int) {
 
 // matMulGGMLParallel is the parallel implementation with more workers
 func matMulGGMLParallel(dst, weight, input []float32, batch, inDim, outDim int) {
-	const numWorkers = 16 // Increased for better parallelism on 24-core CPU
+	const numWorkers = 16 // Balanced for 24-core CPU (sweet spot)
 	const blockSize = 16  // Smaller for better L1 cache utilization
 
 	chunkSize := (outDim + numWorkers - 1) / numWorkers
@@ -82,31 +82,22 @@ func matMulGGMLParallel(dst, weight, input []float32, batch, inDim, outDim int) 
 					for k0 := 0; k0 < inDim; k0 += blockSize {
 						k1 := min(k0+blockSize, inDim)
 
-						// Inner loops optimized for cache locality
+						// Inner loops with SIMD acceleration
 						for i := i0; i < i1; i++ {
 							inputBase := i * inDim
 							dstBase := i * outDim
 
 							for j := j0; j < j1; j++ {
-								sum := float32(0)
 								weightBase := j * inDim
+								blockLen := k1 - k0
 
-								// Unroll by 8 for better ILP
-								k := k0
-								for ; k+7 < k1; k += 8 {
-									sum += input[inputBase+k] * weight[weightBase+k]
-									sum += input[inputBase+k+1] * weight[weightBase+k+1]
-									sum += input[inputBase+k+2] * weight[weightBase+k+2]
-									sum += input[inputBase+k+3] * weight[weightBase+k+3]
-									sum += input[inputBase+k+4] * weight[weightBase+k+4]
-									sum += input[inputBase+k+5] * weight[weightBase+k+5]
-									sum += input[inputBase+k+6] * weight[weightBase+k+6]
-									sum += input[inputBase+k+7] * weight[weightBase+k+7]
-								}
-								// Handle remainder
-								for ; k < k1; k++ {
-									sum += input[inputBase+k] * weight[weightBase+k]
-								}
+								// Use SIMD dot product for the block
+								sum := dotProductSIMD(
+									input[inputBase+k0:inputBase+k1],
+									weight[weightBase+k0:weightBase+k1],
+									blockLen,
+								)
+
 								dst[dstBase+j] += sum
 							}
 						}
