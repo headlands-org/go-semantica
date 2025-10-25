@@ -158,16 +158,21 @@ Comparison with llama.cpp v0.0.3844:
 
 ### AMD Ryzen 9 7900 (x86-64, 12-core)
 
-Latest optimized build with INT8 scale pre-caching:
+Comparison with llama.cpp (git-5cca254):
 
-| Metric | Time | Details |
-|--------|------|---------|
-| **Model Load** | 52ms | Zero-copy mmap |
-| **First Inference** | 76ms | Cold start with layer loading |
-| **Warm Inference** | 25ms | INT8 quantized with AVX2 SIMD |
-| **Peak Memory** | 425 MB | Zero-copy architecture (314MB model + 90MB tokenizer + 21MB runtime) |
+| Metric | llama.cpp | pure-go-llamas | Comparison |
+|--------|-----------|----------------|------------|
+| **Model Load** | 207ms | 52ms | **4.0x faster** |
+| **First Inference** | 224ms | 76ms | **2.9x faster** |
+| **Warm Inference** | 16ms | 25ms | 1.6x slower |
+| **Peak Memory** | ~350 MB | 425 MB | 1.2x more |
 
-**Test setup**: AVX2 SIMD kernels, "Hello world" input (4 tokens), 10-run average after warmup.
+**Test setup**: Single-threaded, "Hello world" input (4 tokens), 10-run average after warmup.
+
+**Analysis**:
+- **Model loading**: Zero-copy mmap gives pure-go-llamas a decisive **4x advantage**
+- **Warm inference**: llama.cpp's highly optimized C++ kernels are **36% faster** (16ms vs 25ms)
+- **Trade-off**: Pure Go achieves competitive performance (within 1.6x) while maintaining portability and memory safety
 
 **Recent optimization**: Pre-caching Q8_0 scales reduced warm inference from 42ms to 25ms (**1.7x faster**, see [OPTIMIZATION_RESULTS.md](OPTIMIZATION_RESULTS.md)).
 
