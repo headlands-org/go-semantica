@@ -53,9 +53,11 @@ go test -bench=BenchmarkMatMul -cpuprofile=cpu.prof ./internal/kernels
 
 2. **Tokenizer (`internal/tokenizer/`)** - SentencePiece/Unigram tokenizer implementation
    - Uses BPE (Byte Pair Encoding) algorithm, not Unigram (despite name)
+   - BPE merge selection: highest score wins; ties broken by rightmost position (llama.cpp compatibility)
    - Supports Gemma byte fallback tokens (236000-236255 range)
    - Special token handling via metadata, not string matching
    - Normalization pipeline: NFKC → accent removal → lowercase
+   - Token ID validation: Comprehensive test suite validates against llama.cpp reference outputs
 
 3. **Kernels (`internal/kernels/`)** - Pure-Go math operations with SIMD
    - `matmul.go`: Matrix multiplication with GGML semantics (weight @ input.T)

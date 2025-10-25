@@ -1,0 +1,222 @@
+{
+  "generated_by": "llama-tokenize (llama.cpp)",
+  "model": "embeddinggemma-300m-Q8_0.gguf",
+  "test_cases": [
+    {
+      "input": "Hello world",
+      "description": "Basic: simple greeting",
+      "token_ids": [2, 9259, 1902, 1]
+    }
+,
+    {
+      "input": "The quick brown fox",
+      "description": "Basic: common phrase",
+      "token_ids": [2, 818, 3823, 8864, 37423, 1]
+    }
+,
+    {
+      "input": "Testing tokenization",
+      "description": "Basic: tech phrase",
+      "token_ids": [2, 26653, 8369, 1854, 1]
+    }
+,
+    {
+      "input": "",
+      "description": "Empty: empty string",
+      "token_ids": [2, 1]
+    }
+,
+    {
+      "input": "a",
+      "description": "Minimal: single letter",
+      "token_ids": [2, 236746, 1]
+    }
+,
+    {
+      "input": "ab",
+      "description": "Minimal: two letters",
+      "token_ids": [2, 596, 1]
+    }
+,
+    {
+      "input": " ",
+      "description": "Minimal: single space",
+      "token_ids": [2, 236743, 1]
+    }
+,
+    {
+      "input": "Hello 👋",
+      "description": "Unicode: emoji wave",
+      "token_ids": [2, 9259, 155818, 1]
+    }
+,
+    {
+      "input": "你好世界",
+      "description": "Unicode: Chinese",
+      "token_ids": [2, 144626, 12811, 1]
+    }
+,
+    {
+      "input": "مرحبا",
+      "description": "Unicode: Arabic",
+      "token_ids": [2, 236873, 150345, 1]
+    }
+,
+    {
+      "input": "こんにちは世界",
+      "description": "Unicode: Japanese",
+      "token_ids": [2, 85141, 12811, 1]
+    }
+,
+    {
+      "input": "Привет мир",
+      "description": "Unicode: Russian",
+      "token_ids": [2, 116130, 58562, 1]
+    }
+,
+    {
+      "input": "γεια σου κόσμε",
+      "description": "Unicode: Greek",
+      "token_ids": [2, 237416, 45730, 127035, 150665, 16115, 1]
+    }
+,
+    {
+      "input": "Hello, world!",
+      "description": "Punctuation: comma and exclamation",
+      "token_ids": [2, 9259, 236764, 1902, 236888, 1]
+    }
+,
+    {
+      "input": "What's this?",
+      "description": "Punctuation: apostrophe and question",
+      "token_ids": [2, 3689, 236789, 236751, 672, 236881, 1]
+    }
+,
+    {
+      "input": "50% off!",
+      "description": "Punctuation: percent sign",
+      "token_ids": [2, 236810, 236771, 236908, 1135, 236888, 1]
+    }
+,
+    {
+      "input": "test@example.com",
+      "description": "Punctuation: email address",
+      "token_ids": [2, 2181, 236940, 8358, 236761, 854, 1]
+    }
+,
+    {
+      "input": "It's a test.",
+      "description": "Punctuation: contraction and period",
+      "token_ids": [2, 1509, 236789, 236751, 496, 1594, 236761, 1]
+    }
+,
+    {
+      "input": "  spaces  ",
+      "description": "Whitespace: leading and trailing",
+      "token_ids": [2, 138, 35220, 138, 1]
+    }
+,
+    {
+      "input": "new\\nlines",
+      "description": "Whitespace: newline character",
+      "token_ids": [2, 1951, 107, 8721, 1]
+    }
+,
+    {
+      "input": "tab\\there",
+      "description": "Whitespace: tab character",
+      "token_ids": [2, 4823, 255968, 8472, 1]
+    }
+,
+    {
+      "input": "multiple   spaces",
+      "description": "Whitespace: multiple spaces",
+      "token_ids": [2, 43819, 139, 35220, 1]
+    }
+,
+    {
+      "input": "#hashtag",
+      "description": "Special: hashtag",
+      "token_ids": [2, 236865, 235707, 1]
+    }
+,
+    {
+      "input": "@mention",
+      "description": "Special: at-mention",
+      "token_ids": [2, 236940, 109219, 1]
+    }
+,
+    {
+      "input": "$100",
+      "description": "Special: dollar sign",
+      "token_ids": [2, 236795, 236770, 236771, 236771, 1]
+    }
+,
+    {
+      "input": "C++",
+      "description": "Special: programming language",
+      "token_ids": [2, 236780, 2124, 1]
+    }
+,
+    {
+      "input": "foo/bar",
+      "description": "Special: slash",
+      "token_ids": [2, 26537, 236786, 2230, 1]
+    }
+,
+    {
+      "input": "key=value",
+      "description": "Special: equals",
+      "token_ids": [2, 2478, 236784, 2394, 1]
+    }
+,
+    {
+      "input": "你好 world 🌍",
+      "description": "Mixed: Chinese, English, emoji",
+      "token_ids": [2, 144626, 1902, 236743, 244906, 1]
+    }
+,
+    {
+      "input": "Test #1: 50% done!",
+      "description": "Mixed: numbers, symbols, punctuation",
+      "token_ids": [2, 3694, 997, 236770, 236787, 236743, 236810, 236771, 236908, 3028, 236888, 1]
+    }
+,
+    {
+      "input": "Email: user@test.com 📧",
+      "description": "Mixed: email with emoji",
+      "token_ids": [2, 11919, 236787, 2430, 236940, 2181, 236761, 854, 236743, 249979, 1]
+    }
+,
+    {
+      "input": "123456",
+      "description": "Numbers: digits",
+      "token_ids": [2, 236770, 236778, 236800, 236812, 236810, 236825, 1]
+    }
+,
+    {
+      "input": "3.14159",
+      "description": "Numbers: decimal",
+      "token_ids": [2, 236800, 236761, 236770, 236812, 236770, 236810, 236819, 1]
+    }
+,
+    {
+      "input": "1,000,000",
+      "description": "Numbers: with commas",
+      "token_ids": [2, 236770, 236764, 236771, 236771, 236771, 236764, 236771, 236771, 236771, 1]
+    }
+,
+    {
+      "input": "This is a longer sentence with more than thirty words to test how the tokenizer handles longer sequences of text including various punctuation marks and common English words.",
+      "description": "Long: 30+ words",
+      "token_ids": [2, 2094, 563, 496, 4890, 13315, 607, 919, 1082, 19925, 4171, 531, 1594, 1217, 506, 92875, 19171, 4890, 17047, 529, 1816, 2440, 3572, 88078, 12933, 532, 3364, 5422, 4171, 236761, 1]
+    }
+,
+    {
+      "input": "The quick brown fox jumps over the lazy dog. This pangram contains every letter of the English alphabet at least once, making it useful for testing.",
+      "description": "Long: pangram with explanation",
+      "token_ids": [2, 818, 3823, 8864, 37423, 38167, 1024, 506, 31770, 4799, 236761, 1174, 45494, 1043, 6097, 1418, 6064, 529, 506, 5422, 30796, 657, 3198, 3622, 236764, 3043, 625, 6684, 573, 7257, 236761, 1]
+    }
+
+  ]
+}

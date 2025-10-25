@@ -222,10 +222,12 @@ func (t *Tokenizer) tokenizeBPE(text string) []string {
 		}
 
 		// Find highest-scoring bigram (least negative = best)
+		// When scores are equal, use rightmost position (matches llama.cpp behavior)
 		bestIdx := 0
 		bestScore := candidates[0].score
 		for i := 1; i < len(candidates); i++ {
-			if candidates[i].score > bestScore {
+			if candidates[i].score > bestScore ||
+				(candidates[i].score == bestScore && candidates[i].left > candidates[bestIdx].left) {
 				bestScore = candidates[i].score
 				bestIdx = i
 			}
