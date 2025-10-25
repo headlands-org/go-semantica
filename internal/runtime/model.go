@@ -51,7 +51,58 @@ type Model struct {
 	ropeCache *kernels.RoPECache
 
 	// Buffers for inference (reusable scratch space)
-	scratch []float32
+	scratch    []float32
+	bufferPool *BufferPool
+}
+
+// BufferPool manages pre-allocated buffers for inference
+type BufferPool struct {
+	// Large pre-allocated buffer
+	buffer []float32
+
+	// Buffer offsets (computed based on maxSeqLen and config)
+	qkvOffset     int // Q, K, V projections
+	attnOffset    int // Attention output
+	scratchOffset int // Attention scratch
+	mlpOffset     int // MLP gate/up
+}
+
+// newBufferPool creates a buffer pool for the given configuration
+func newBufferPool(cfg ModelConfig) *BufferPool {
+	maxSeqLen := cfg.MaxSeqLen
+	embDim := cfg.EmbedDim
+	kvDim := cfg.NumKVHeads * cfg.HeadDim
+	intermDim := cfg.IntermDim
+	nHeads := cfg.NumHeads
+
+	// Calculate buffer sizes
+	qkvSize := maxSeqLen * (embDim + kvDim*2)           // Q + K + V
+	attnSize := maxSeqLen * embDim                       // Attention output
+	scratchSize := maxSeqLen * maxSeqLen * nHeads        // Attention scratch
+	mlpSize := maxSeqLen * intermDim * 2                 // Gate + Up
+
+	// Calculate offsets
+	offset := 0
+	qkvOffset := offset
+	offset += qkvSize
+	attnOffset := offset
+	offset += attnSize
+	scratchOffset := offset
+	offset += scratchSize
+	mlpOffset := offset
+	offset += mlpSize
+
+	// Allocate single large buffer
+	totalSize := offset
+	buffer := make([]float32, totalSize)
+
+	return &BufferPool{
+		buffer:        buffer,
+		qkvOffset:     qkvOffset,
+		attnOffset:    attnOffset,
+		scratchOffset: scratchOffset,
+		mlpOffset:     mlpOffset,
+	}
 }
 
 // Layer represents a transformer encoder layer
@@ -117,6 +168,9 @@ func LoadModel(path string) (*Model, error) {
 	if config.UseRoPE {
 		model.ropeCache = kernels.NewRoPECache(config.HeadDim, config.RoPEBase, config.MaxSeqLen)
 	}
+
+	// Initialize buffer pool for inference
+	model.bufferPool = newBufferPool(config)
 
 	return model, nil
 }

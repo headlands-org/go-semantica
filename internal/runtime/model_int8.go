@@ -297,10 +297,11 @@ func (m *Model) runAttentionINT8(output []float32, hiddenINT8 *kernels.Quantized
 	headDim := m.config.HeadDim
 	kvDim := nKVHeads * headDim
 
-	// Allocate Q, K, V (FP32 outputs from INT8 matmul)
-	q := make([]float32, seqLen*embDim)
-	k := make([]float32, seqLen*kvDim)
-	v := make([]float32, seqLen*kvDim)
+	// Use pre-allocated buffers from pool
+	pool := m.bufferPool
+	q := pool.buffer[pool.qkvOffset : pool.qkvOffset+seqLen*embDim]
+	k := pool.buffer[pool.qkvOffset+seqLen*embDim : pool.qkvOffset+seqLen*embDim+seqLen*kvDim]
+	v := pool.buffer[pool.qkvOffset+seqLen*embDim+seqLen*kvDim : pool.qkvOffset+seqLen*embDim+seqLen*kvDim*2]
 
 	// Project using INT8 x Q8_0 matmul (raw bytes, zero-copy)
 	kernels.MatMulQ8_0INT8(q, layer.qWeightQ8, layer.qWeightScales, hiddenINT8, seqLen, embDim, embDim)
@@ -360,9 +361,9 @@ func (m *Model) runAttentionINT8(output []float32, hiddenINT8 *kernels.Quantized
 		vExpanded = v
 	}
 
-	// Run attention (FP32)
-	attnOut := make([]float32, seqLen*embDim)
-	attnScratch := make([]float32, seqLen*seqLen*nHeads)
+	// Run attention (FP32) - use pre-allocated buffers
+	attnOut := pool.buffer[pool.attnOffset : pool.attnOffset+seqLen*embDim]
+	attnScratch := pool.buffer[pool.scratchOffset : pool.scratchOffset+seqLen*seqLen*nHeads]
 	kernels.MultiHeadAttentionWithScale(attnOut, q, kExpanded, vExpanded, 1, seqLen, nHeads, headDim, nil, m.config.AttentionScale, attnScratch)
 
 	// Quantize attention output
@@ -377,9 +378,10 @@ func (m *Model) runMLPINT8(output []float32, hiddenINT8 *kernels.QuantizedTensor
 	embDim := m.config.EmbedDim
 	intermDim := m.config.IntermDim
 
-	// Allocate gate and up (FP32)
-	gate := make([]float32, seqLen*intermDim)
-	up := make([]float32, seqLen*intermDim)
+	// Use pre-allocated buffers from pool (FP32)
+	pool := m.bufferPool
+	gate := pool.buffer[pool.mlpOffset : pool.mlpOffset+seqLen*intermDim]
+	up := pool.buffer[pool.mlpOffset+seqLen*intermDim : pool.mlpOffset+seqLen*intermDim*2]
 
 	// Gate and up projections with INT8 (raw bytes, zero-copy)
 	kernels.MatMulQ8_0INT8(gate, layer.gateWeightQ8, layer.gateWeightScales, hiddenINT8, seqLen, embDim, intermDim)
