@@ -55,6 +55,8 @@ func dotProductScalar(a, b []float32, n int) float32 {
 
 // dotProductINT8SIMD is the SIMD-accelerated INT8 dot product
 // Returns int32 accumulator (caller applies scaling)
+//
+//go:inline
 func dotProductINT8SIMD(a, b []int8, n int) int32 {
 	if n == 0 {
 		return 0

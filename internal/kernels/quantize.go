@@ -362,37 +362,40 @@ func matMulQ8_0INT8Serial(dst []float32, weightData []byte, scales []float32, in
 			// Weight row j starts at offset j * bytesPerRow
 			weightRowOffset := j * bytesPerRow
 
-			// Process weight in blocks of 32
-			for blockIdx := 0; blockIdx < blocksPerRow; blockIdx++ {
-				blockOffset := weightRowOffset + blockIdx*34
+			// Hoist input scale lookup
+			inputScale := input.Scale
 
-				// Read scale from pre-converted array
+			// Process full blocks of 32 (fast path)
+			fullBlocks := inDim / 32
+			for blockIdx := 0; blockIdx < fullBlocks; blockIdx++ {
+				blockOffset := weightRowOffset + blockIdx*34
 				scaleIdx := j*blocksPerRow + blockIdx
 				scale := scales[scaleIdx]
-
-				// Skip 2-byte float16 scale, read int8s directly
 				qsOffset := blockOffset + 2
-
-				// Compute how many elements in this block
 				blockStart := blockIdx * 32
-				blockEnd := blockStart + 32
-				if blockEnd > inDim {
-					blockEnd = inDim
-				}
-				blockSize := blockEnd - blockStart
 
-				// Dot product with this block
-				// Use SIMD if available for better performance
-				// Convert byte slice to int8 slice for SIMD function
+				inputSlice := input.Data[i*inDim+blockStart : i*inDim+blockStart+32]
+				weightSlice := unsafe.Slice((*int8)(unsafe.Pointer(&weightData[qsOffset])), 32)
+				blockSum := dotProductINT8SIMD(inputSlice, weightSlice, 32)
+
+				sum += float32(blockSum) * scale * inputScale
+			}
+
+			// Handle partial block if needed
+			if inDim%32 != 0 {
+				blockIdx := fullBlocks
+				blockOffset := weightRowOffset + blockIdx*34
+				scaleIdx := j*blocksPerRow + blockIdx
+				scale := scales[scaleIdx]
+				qsOffset := blockOffset + 2
+				blockStart := blockIdx * 32
+				blockSize := inDim - blockStart
+
 				inputSlice := input.Data[i*inDim+blockStart : i*inDim+blockStart+blockSize]
-
-				// Zero-copy reinterpretation: []byte → []int8
 				weightSlice := unsafe.Slice((*int8)(unsafe.Pointer(&weightData[qsOffset])), blockSize)
-
 				blockSum := dotProductINT8SIMD(inputSlice, weightSlice, blockSize)
 
-				// Dequantize: INT32 accumulator * Q8_0 scale * input scale
-				sum += float32(blockSum) * scale * input.Scale
+				sum += float32(blockSum) * scale * inputScale
 			}
 
 			dst[i*outDim+j] = sum
@@ -426,31 +429,40 @@ func matMulQ8_0INT8Parallel(dst []float32, weightData []byte, scales []float32, 
 				for j := j0; j < j1; j++ {
 					sum := float32(0)
 					weightRowOffset := j * bytesPerRow
+					inputScale := input.Scale
 
-					for blockIdx := 0; blockIdx < blocksPerRow; blockIdx++ {
+					// Fast path: process full 32-element blocks
+					fullBlocks := inDim / 32
+					for blockIdx := 0; blockIdx < fullBlocks; blockIdx++ {
 						blockOffset := weightRowOffset + blockIdx*34
-
-						// Read scale from pre-converted array
 						scaleIdx := j*blocksPerRow + blockIdx
 						scale := scales[scaleIdx]
-
-						// Skip 2-byte scale, read int8s directly
 						qsOffset := blockOffset + 2
-
 						blockStart := blockIdx * 32
-						blockEnd := blockStart + 32
-						if blockEnd > inDim {
-							blockEnd = inDim
-						}
-						blockSize := blockEnd - blockStart
 
-						// Use SIMD for dot product
+						// Inline SIMD call for common case (32 elements)
+						inputSlice := input.Data[i*inDim+blockStart : i*inDim+blockStart+32]
+						weightSlice := unsafe.Slice((*int8)(unsafe.Pointer(&weightData[qsOffset])), 32)
+						blockSum := dotProductINT8SIMD(inputSlice, weightSlice, 32)
+
+						sum += float32(blockSum) * scale * inputScale
+					}
+
+					// Handle partial block if needed
+					if inDim%32 != 0 {
+						blockIdx := fullBlocks
+						blockOffset := weightRowOffset + blockIdx*34
+						scaleIdx := j*blocksPerRow + blockIdx
+						scale := scales[scaleIdx]
+						qsOffset := blockOffset + 2
+						blockStart := blockIdx * 32
+						blockSize := inDim - blockStart
+
 						inputSlice := input.Data[i*inDim+blockStart : i*inDim+blockStart+blockSize]
-						// Zero-copy reinterpretation: []byte → []int8
 						weightSlice := unsafe.Slice((*int8)(unsafe.Pointer(&weightData[qsOffset])), blockSize)
 						blockSum := dotProductINT8SIMD(inputSlice, weightSlice, blockSize)
 
-						sum += float32(blockSum) * scale * input.Scale
+						sum += float32(blockSum) * scale * inputScale
 					}
 
 					dst[i*outDim+j] = sum
