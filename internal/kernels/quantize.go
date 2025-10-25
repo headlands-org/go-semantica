@@ -3,8 +3,7 @@ package kernels
 import (
 	"math"
 	"sync"
-
-	"github.com/lth/pure-go-llamas/internal/gguf"
+	"unsafe"
 )
 
 // QuantizedTensorINT8 represents a symmetric INT8-quantized tensor
@@ -313,6 +312,7 @@ func matMulQ8_0INT8FastParallel(dst []float32, weight *Q8_0Tensor, input *Quanti
 // This preserves per-block quantization from Q8_0 for better accuracy
 //
 // weightData: Q8_0 quantized weight tensor (raw bytes from GGUF)
+// scales: Pre-extracted float32 scales (one per 32-element block)
 // input: INT8 quantized activations
 // dst: FP32 output (dequantized)
 //
@@ -321,7 +321,7 @@ func matMulQ8_0INT8FastParallel(dst []float32, weight *Q8_0Tensor, input *Quanti
 // Output is [batch, outDim]
 //
 // DEPRECATED: Use MatMulQ8_0INT8Fast with pre-parsed weights for better performance
-func MatMulQ8_0INT8(dst []float32, weightData []byte, input *QuantizedTensorINT8, batch, inDim, outDim int) {
+func MatMulQ8_0INT8(dst []float32, weightData []byte, scales []float32, input *QuantizedTensorINT8, batch, inDim, outDim int) {
 	if input.Rows != batch || input.Cols != inDim {
 		panic("MatMulQ8_0INT8: input shape mismatch")
 	}
@@ -346,14 +346,14 @@ func MatMulQ8_0INT8(dst []float32, weightData []byte, input *QuantizedTensorINT8
 	// Use parallel execution for large matrices (same threshold as FP32)
 	const parallelThreshold = 256
 	if outDim >= parallelThreshold {
-		matMulQ8_0INT8Parallel(dst, weightData, input, batch, inDim, outDim, blocksPerRow, bytesPerRow)
+		matMulQ8_0INT8Parallel(dst, weightData, scales, input, batch, inDim, outDim, blocksPerRow, bytesPerRow)
 	} else {
-		matMulQ8_0INT8Serial(dst, weightData, input, batch, inDim, outDim, blocksPerRow, bytesPerRow)
+		matMulQ8_0INT8Serial(dst, weightData, scales, input, batch, inDim, outDim, blocksPerRow, bytesPerRow)
 	}
 }
 
 // matMulQ8_0INT8Serial is the serial implementation
-func matMulQ8_0INT8Serial(dst []float32, weightData []byte, input *QuantizedTensorINT8, batch, inDim, outDim, blocksPerRow, bytesPerRow int) {
+func matMulQ8_0INT8Serial(dst []float32, weightData []byte, scales []float32, input *QuantizedTensorINT8, batch, inDim, outDim, blocksPerRow, bytesPerRow int) {
 	// For each output position
 	for i := 0; i < batch; i++ {
 		for j := 0; j < outDim; j++ {
@@ -366,8 +366,12 @@ func matMulQ8_0INT8Serial(dst []float32, weightData []byte, input *QuantizedTens
 			for blockIdx := 0; blockIdx < blocksPerRow; blockIdx++ {
 				blockOffset := weightRowOffset + blockIdx*34
 
-				// Parse Q8_0 block
-				block := gguf.ParseQ8_0Block(weightData[blockOffset : blockOffset+34])
+				// Read scale from pre-converted array
+				scaleIdx := j*blocksPerRow + blockIdx
+				scale := scales[scaleIdx]
+
+				// Skip 2-byte float16 scale, read int8s directly
+				qsOffset := blockOffset + 2
 
 				// Compute how many elements in this block
 				blockStart := blockIdx * 32
@@ -379,12 +383,16 @@ func matMulQ8_0INT8Serial(dst []float32, weightData []byte, input *QuantizedTens
 
 				// Dot product with this block
 				// Use SIMD if available for better performance
+				// Convert byte slice to int8 slice for SIMD function
 				inputSlice := input.Data[i*inDim+blockStart : i*inDim+blockStart+blockSize]
-				weightSlice := block.Qs[:blockSize]
+
+				// Zero-copy reinterpretation: []byte → []int8
+				weightSlice := unsafe.Slice((*int8)(unsafe.Pointer(&weightData[qsOffset])), blockSize)
+
 				blockSum := dotProductINT8SIMD(inputSlice, weightSlice, blockSize)
 
 				// Dequantize: INT32 accumulator * Q8_0 scale * input scale
-				sum += float32(blockSum) * block.Scale * input.Scale
+				sum += float32(blockSum) * scale * input.Scale
 			}
 
 			dst[i*outDim+j] = sum
@@ -393,7 +401,7 @@ func matMulQ8_0INT8Serial(dst []float32, weightData []byte, input *QuantizedTens
 }
 
 // matMulQ8_0INT8Parallel is the parallel implementation
-func matMulQ8_0INT8Parallel(dst []float32, weightData []byte, input *QuantizedTensorINT8, batch, inDim, outDim, blocksPerRow, bytesPerRow int) {
+func matMulQ8_0INT8Parallel(dst []float32, weightData []byte, scales []float32, input *QuantizedTensorINT8, batch, inDim, outDim, blocksPerRow, bytesPerRow int) {
 	const numWorkers = 16
 	chunkSize := (outDim + numWorkers - 1) / numWorkers
 
@@ -421,7 +429,13 @@ func matMulQ8_0INT8Parallel(dst []float32, weightData []byte, input *QuantizedTe
 
 					for blockIdx := 0; blockIdx < blocksPerRow; blockIdx++ {
 						blockOffset := weightRowOffset + blockIdx*34
-						block := gguf.ParseQ8_0Block(weightData[blockOffset : blockOffset+34])
+
+						// Read scale from pre-converted array
+						scaleIdx := j*blocksPerRow + blockIdx
+						scale := scales[scaleIdx]
+
+						// Skip 2-byte scale, read int8s directly
+						qsOffset := blockOffset + 2
 
 						blockStart := blockIdx * 32
 						blockEnd := blockStart + 32
@@ -432,10 +446,11 @@ func matMulQ8_0INT8Parallel(dst []float32, weightData []byte, input *QuantizedTe
 
 						// Use SIMD for dot product
 						inputSlice := input.Data[i*inDim+blockStart : i*inDim+blockStart+blockSize]
-						weightSlice := block.Qs[:blockSize]
+						// Zero-copy reinterpretation: []byte → []int8
+						weightSlice := unsafe.Slice((*int8)(unsafe.Pointer(&weightData[qsOffset])), blockSize)
 						blockSum := dotProductINT8SIMD(inputSlice, weightSlice, blockSize)
 
-						sum += float32(blockSum) * block.Scale * input.Scale
+						sum += float32(blockSum) * scale * input.Scale
 					}
 
 					dst[i*outDim+j] = sum

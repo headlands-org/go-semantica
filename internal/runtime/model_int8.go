@@ -12,14 +12,33 @@ import (
 type LayerINT8 struct {
 	// Attention weights as raw Q8_0 bytes (direct views into GGUF)
 	qWeightQ8  []byte // [embDim, embDim]
+	// Pre-converted float32 scales (one per 32-element block, extracted from Q8_0)
+	qWeightScales []float32
+
 	kWeightQ8  []byte // [embDim, kvDim]
+	// Pre-converted float32 scales (one per 32-element block, extracted from Q8_0)
+	kWeightScales []float32
+
 	vWeightQ8  []byte // [embDim, kvDim]
+	// Pre-converted float32 scales (one per 32-element block, extracted from Q8_0)
+	vWeightScales []float32
+
 	oWeightQ8  []byte // [embDim, embDim]
+	// Pre-converted float32 scales (one per 32-element block, extracted from Q8_0)
+	oWeightScales []float32
 
 	// MLP weights as raw Q8_0 bytes (direct views into GGUF)
 	gateWeightQ8 []byte // [embDim, intermDim]
+	// Pre-converted float32 scales (one per 32-element block, extracted from Q8_0)
+	gateWeightScales []float32
+
 	upWeightQ8   []byte // [embDim, intermDim]
+	// Pre-converted float32 scales (one per 32-element block, extracted from Q8_0)
+	upWeightScales []float32
+
 	downWeightQ8 []byte // [intermDim, embDim]
+	// Pre-converted float32 scales (one per 32-element block, extracted from Q8_0)
+	downWeightScales []float32
 
 	// Keep norm weights as FP32 (they're small and need precision)
 	attnNormWeight     []float32
@@ -55,30 +74,43 @@ func (m *Model) loadLayerINT8(layerIdx int) (*LayerINT8, error) {
 	if err != nil {
 		return nil, err
 	}
+	layer.qWeightScales = extractQ8_0Scales(layer.qWeightQ8)
+
 	layer.kWeightQ8, err = m.loadTensorQ8Bytes(prefix + ".attn_k.weight")
 	if err != nil {
 		return nil, err
 	}
+	layer.kWeightScales = extractQ8_0Scales(layer.kWeightQ8)
+
 	layer.vWeightQ8, err = m.loadTensorQ8Bytes(prefix + ".attn_v.weight")
 	if err != nil {
 		return nil, err
 	}
+	layer.vWeightScales = extractQ8_0Scales(layer.vWeightQ8)
+
 	layer.oWeightQ8, err = m.loadTensorQ8Bytes(prefix + ".attn_output.weight")
 	if err != nil {
 		return nil, err
 	}
+	layer.oWeightScales = extractQ8_0Scales(layer.oWeightQ8)
+
 	layer.gateWeightQ8, err = m.loadTensorQ8Bytes(prefix + ".ffn_gate.weight")
 	if err != nil {
 		return nil, err
 	}
+	layer.gateWeightScales = extractQ8_0Scales(layer.gateWeightQ8)
+
 	layer.upWeightQ8, err = m.loadTensorQ8Bytes(prefix + ".ffn_up.weight")
 	if err != nil {
 		return nil, err
 	}
+	layer.upWeightScales = extractQ8_0Scales(layer.upWeightQ8)
+
 	layer.downWeightQ8, err = m.loadTensorQ8Bytes(prefix + ".ffn_down.weight")
 	if err != nil {
 		return nil, err
 	}
+	layer.downWeightScales = extractQ8_0Scales(layer.downWeightQ8)
 
 	return layer, nil
 }
@@ -271,9 +303,9 @@ func (m *Model) runAttentionINT8(output []float32, hiddenINT8 *kernels.Quantized
 	v := make([]float32, seqLen*kvDim)
 
 	// Project using INT8 x Q8_0 matmul (raw bytes, zero-copy)
-	kernels.MatMulQ8_0INT8(q, layer.qWeightQ8, hiddenINT8, seqLen, embDim, embDim)
-	kernels.MatMulQ8_0INT8(k, layer.kWeightQ8, hiddenINT8, seqLen, embDim, kvDim)
-	kernels.MatMulQ8_0INT8(v, layer.vWeightQ8, hiddenINT8, seqLen, embDim, kvDim)
+	kernels.MatMulQ8_0INT8(q, layer.qWeightQ8, layer.qWeightScales, hiddenINT8, seqLen, embDim, embDim)
+	kernels.MatMulQ8_0INT8(k, layer.kWeightQ8, layer.kWeightScales, hiddenINT8, seqLen, embDim, kvDim)
+	kernels.MatMulQ8_0INT8(v, layer.vWeightQ8, layer.vWeightScales, hiddenINT8, seqLen, embDim, kvDim)
 
 	// Q/K normalization (FP32)
 	if len(layer.qNormWeight) > 0 {
@@ -336,7 +368,7 @@ func (m *Model) runAttentionINT8(output []float32, hiddenINT8 *kernels.Quantized
 	attnOutINT8 := kernels.QuantizeSymmetricINT8(attnOut, seqLen, embDim)
 
 	// Project output with INT8 (raw bytes, zero-copy)
-	kernels.MatMulQ8_0INT8(output, layer.oWeightQ8, &attnOutINT8, seqLen, embDim, embDim)
+	kernels.MatMulQ8_0INT8(output, layer.oWeightQ8, layer.oWeightScales, &attnOutINT8, seqLen, embDim, embDim)
 }
 
 // runMLPINT8 runs MLP with INT8 activations
@@ -349,8 +381,8 @@ func (m *Model) runMLPINT8(output []float32, hiddenINT8 *kernels.QuantizedTensor
 	up := make([]float32, seqLen*intermDim)
 
 	// Gate and up projections with INT8 (raw bytes, zero-copy)
-	kernels.MatMulQ8_0INT8(gate, layer.gateWeightQ8, hiddenINT8, seqLen, embDim, intermDim)
-	kernels.MatMulQ8_0INT8(up, layer.upWeightQ8, hiddenINT8, seqLen, embDim, intermDim)
+	kernels.MatMulQ8_0INT8(gate, layer.gateWeightQ8, layer.gateWeightScales, hiddenINT8, seqLen, embDim, intermDim)
+	kernels.MatMulQ8_0INT8(up, layer.upWeightQ8, layer.upWeightScales, hiddenINT8, seqLen, embDim, intermDim)
 
 	// Apply GELU to gate (FP32)
 	kernels.GELU(gate, gate, seqLen*intermDim)
@@ -362,5 +394,34 @@ func (m *Model) runMLPINT8(output []float32, hiddenINT8 *kernels.QuantizedTensor
 	gateINT8 := kernels.QuantizeSymmetricINT8(gate, seqLen, intermDim)
 
 	// Down projection with INT8 (raw bytes, zero-copy)
-	kernels.MatMulQ8_0INT8(output, layer.downWeightQ8, &gateINT8, seqLen, intermDim, embDim)
+	kernels.MatMulQ8_0INT8(output, layer.downWeightQ8, layer.downWeightScales, &gateINT8, seqLen, intermDim, embDim)
+}
+
+// extractQ8_0Scales extracts float32 scales from raw Q8_0 quantized data
+// Q8_0 format: 34 bytes per block = [2-byte float16 scale] + [32 int8 values]
+// Returns one float32 scale per block
+func extractQ8_0Scales(data []byte) []float32 {
+	// Handle edge case: empty data
+	if len(data) == 0 {
+		return nil
+	}
+
+	const blockSize = 34
+	numBlocks := len(data) / blockSize
+
+	// Handle edge case: partial block (shouldn't happen with valid Q8_0 data)
+	if numBlocks == 0 {
+		return nil
+	}
+
+	scales := make([]float32, numBlocks)
+
+	for i := 0; i < numBlocks; i++ {
+		offset := i * blockSize
+		// Parse the scale using existing Q8_0 block parser
+		block := gguf.ParseQ8_0Block(data[offset : offset+blockSize])
+		scales[i] = block.Scale
+	}
+
+	return scales
 }

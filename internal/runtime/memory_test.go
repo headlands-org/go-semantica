@@ -38,13 +38,14 @@ func TestMemoryUsage(t *testing.T) {
 	delta := float64(m2.HeapAlloc-m1.HeapAlloc) / 1024 / 1024
 	t.Logf("\nMemory increase from model: %.2f MB", delta)
 	t.Logf("GGUF file size: ~314 MB")
-	t.Logf("Expected: GGUF (~314 MB) + tokenizer (~90 MB) + norms (~10 MB) = ~414 MB")
+	t.Logf("Expected: GGUF (~314 MB) + tokenizer (~90 MB) + norms (~10 MB) + scales (~10 MB) = ~424 MB")
 
-	// Zero-copy target: GGUF size + tokenizer + small overhead
-	if delta > 450 {
-		t.Errorf("❌ Memory usage too high: %.2f MB > 450 MB", delta)
+	// Zero-copy target: GGUF size + tokenizer + norms + pre-converted scales
+	// Scales: 18 layers × 7 weights × ~10KB each ≈ 10 MB
+	if delta > 460 {
+		t.Errorf("❌ Memory usage too high: %.2f MB > 460 MB", delta)
 	} else {
-		t.Logf("✅ Zero-copy SUCCESS! Memory: %.2f MB (GGUF + tokenizer + norms)", delta)
+		t.Logf("✅ Zero-copy SUCCESS! Memory: %.2f MB (GGUF + tokenizer + norms + scales)", delta)
 	}
 
 	// Run inference
@@ -71,7 +72,8 @@ func TestMemoryUsage(t *testing.T) {
 	t.Logf("  Layer weights: 0 MB (slice views into GGUF)")
 	t.Logf("  Tokenizer vocab: ~90 MB")
 	t.Logf("  FP32 norm weights: ~5-10 MB")
-	t.Logf("  Total expected: ~414 MB")
+	t.Logf("  Pre-converted scales: ~10 MB (18 layers × 7 weights)")
+	t.Logf("  Total expected: ~424 MB")
 }
 
 func BenchmarkMemoryForward(b *testing.B) {
