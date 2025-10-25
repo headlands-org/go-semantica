@@ -1,0 +1,24 @@
+# Binaries
+*.test
+embeddinggemma-demo
+gemma-embed
+gguf-inspect
+simple
+examples/test-components/test-components
+
+# Profile files
+*.prof
+*.pprof
+
+# Model files (large)
+models/
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
