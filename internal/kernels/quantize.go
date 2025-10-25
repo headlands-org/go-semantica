@@ -2,9 +2,117 @@ package kernels
 
 import (
 	"math"
+	"runtime"
 	"sync"
 	"unsafe"
 )
+
+// matmulWorkerPool is a persistent worker pool for parallel matmul
+type matmulWorkerPool struct {
+	workers   int
+	workQueue chan matmulJob
+	wg        sync.WaitGroup
+}
+
+type matmulJob struct {
+	dst          []float32
+	weightData   []byte
+	scales       []float32
+	input        *QuantizedTensorINT8
+	batch        int
+	inDim        int
+	outDim       int
+	blocksPerRow int
+	bytesPerRow  int
+	j0, j1       int
+}
+
+var (
+	globalMatmulPool     *matmulWorkerPool
+	globalMatmulPoolOnce sync.Once
+)
+
+// getMatmulPool returns the singleton worker pool
+func getMatmulPool() *matmulWorkerPool {
+	globalMatmulPoolOnce.Do(func() {
+		numWorkers := runtime.GOMAXPROCS(0)
+		if numWorkers > 16 {
+			numWorkers = 16 // Cap at 16 workers
+		}
+		globalMatmulPool = &matmulWorkerPool{
+			workers:   numWorkers,
+			workQueue: make(chan matmulJob, numWorkers*2),
+		}
+		globalMatmulPool.start()
+	})
+	return globalMatmulPool
+}
+
+// start initializes the worker goroutines
+func (p *matmulWorkerPool) start() {
+	for w := 0; w < p.workers; w++ {
+		go p.worker()
+	}
+}
+
+// worker processes jobs from the work queue
+func (p *matmulWorkerPool) worker() {
+	for job := range p.workQueue {
+		p.processJob(job)
+		p.wg.Done()
+	}
+}
+
+// processJob executes a matmul job
+func (p *matmulWorkerPool) processJob(job matmulJob) {
+	if job.j0 >= job.outDim {
+		return
+	}
+
+	for i := 0; i < job.batch; i++ {
+		for j := job.j0; j < job.j1; j++ {
+			sum := float32(0)
+			weightRowOffset := j * job.bytesPerRow
+			inputScale := job.input.Scale
+
+			// Process full blocks of 32 (fast path)
+			fullBlocks := job.inDim / 32
+			for blockIdx := 0; blockIdx < fullBlocks; blockIdx++ {
+				blockOffset := weightRowOffset + blockIdx*34
+				scaleIdx := j*job.blocksPerRow + blockIdx
+				scale := job.scales[scaleIdx]
+				qsOffset := blockOffset + 2
+				blockStart := blockIdx * 32
+
+				// Direct assembly call - bypass dispatcher overhead
+				inputPtr := (*int8)(unsafe.Pointer(&job.input.Data[i*job.inDim+blockStart]))
+				weightPtr := (*int8)(unsafe.Pointer(&job.weightData[qsOffset]))
+				blockSum := dotProductINT8Asm(inputPtr, weightPtr, 32)
+
+				sum += float32(blockSum) * scale * inputScale
+			}
+
+			// Handle partial block if needed
+			if job.inDim%32 != 0 {
+				blockIdx := fullBlocks
+				blockOffset := weightRowOffset + blockIdx*34
+				scaleIdx := j*job.blocksPerRow + blockIdx
+				scale := job.scales[scaleIdx]
+				qsOffset := blockOffset + 2
+				blockStart := blockIdx * 32
+				blockSize := job.inDim - blockStart
+
+				inputSlice := job.input.Data[i*job.inDim+blockStart : i*job.inDim+blockStart+blockSize]
+				weightSlice := unsafe.Slice((*int8)(unsafe.Pointer(&job.weightData[qsOffset])), blockSize)
+				blockSum := dotProductINT8SIMD(inputSlice, weightSlice, blockSize)
+
+				sum += float32(blockSum) * scale * inputScale
+			}
+
+			job.dst[i*job.outDim+j] = sum
+		}
+	}
+}
 
 // QuantizedTensorINT8 represents a symmetric INT8-quantized tensor
 // Values are quantized as: q = round(x / scale)
@@ -374,9 +482,10 @@ func matMulQ8_0INT8Serial(dst []float32, weightData []byte, scales []float32, in
 				qsOffset := blockOffset + 2
 				blockStart := blockIdx * 32
 
-				inputSlice := input.Data[i*inDim+blockStart : i*inDim+blockStart+32]
-				weightSlice := unsafe.Slice((*int8)(unsafe.Pointer(&weightData[qsOffset])), 32)
-				blockSum := dotProductINT8SIMD(inputSlice, weightSlice, 32)
+				// Direct assembly call - bypass dispatcher overhead
+				inputPtr := (*int8)(unsafe.Pointer(&input.Data[i*inDim+blockStart]))
+				weightPtr := (*int8)(unsafe.Pointer(&weightData[qsOffset]))
+				blockSum := dotProductINT8Asm(inputPtr, weightPtr, 32)
 
 				sum += float32(blockSum) * scale * inputScale
 			}
@@ -403,13 +512,13 @@ func matMulQ8_0INT8Serial(dst []float32, weightData []byte, scales []float32, in
 	}
 }
 
-// matMulQ8_0INT8Parallel is the parallel implementation
+// matMulQ8_0INT8Parallel is the parallel implementation using persistent worker pool
 func matMulQ8_0INT8Parallel(dst []float32, weightData []byte, scales []float32, input *QuantizedTensorINT8, batch, inDim, outDim, blocksPerRow, bytesPerRow int) {
-	const numWorkers = 16
+	pool := getMatmulPool()
+	numWorkers := pool.workers
 	chunkSize := (outDim + numWorkers - 1) / numWorkers
 
-	var wg sync.WaitGroup
-	wg.Add(numWorkers)
+	pool.wg.Add(numWorkers)
 
 	for w := 0; w < numWorkers; w++ {
 		j0 := w * chunkSize
@@ -418,59 +527,21 @@ func matMulQ8_0INT8Parallel(dst []float32, weightData []byte, scales []float32, 
 			j1 = outDim
 		}
 
-		go func(j0, j1 int) {
-			defer wg.Done()
-
-			if j0 >= outDim {
-				return
-			}
-
-			for i := 0; i < batch; i++ {
-				for j := j0; j < j1; j++ {
-					sum := float32(0)
-					weightRowOffset := j * bytesPerRow
-					inputScale := input.Scale
-
-					// Fast path: process full 32-element blocks
-					fullBlocks := inDim / 32
-					for blockIdx := 0; blockIdx < fullBlocks; blockIdx++ {
-						blockOffset := weightRowOffset + blockIdx*34
-						scaleIdx := j*blocksPerRow + blockIdx
-						scale := scales[scaleIdx]
-						qsOffset := blockOffset + 2
-						blockStart := blockIdx * 32
-
-						// Inline SIMD call for common case (32 elements)
-						inputSlice := input.Data[i*inDim+blockStart : i*inDim+blockStart+32]
-						weightSlice := unsafe.Slice((*int8)(unsafe.Pointer(&weightData[qsOffset])), 32)
-						blockSum := dotProductINT8SIMD(inputSlice, weightSlice, 32)
-
-						sum += float32(blockSum) * scale * inputScale
-					}
-
-					// Handle partial block if needed
-					if inDim%32 != 0 {
-						blockIdx := fullBlocks
-						blockOffset := weightRowOffset + blockIdx*34
-						scaleIdx := j*blocksPerRow + blockIdx
-						scale := scales[scaleIdx]
-						qsOffset := blockOffset + 2
-						blockStart := blockIdx * 32
-						blockSize := inDim - blockStart
-
-						inputSlice := input.Data[i*inDim+blockStart : i*inDim+blockStart+blockSize]
-						weightSlice := unsafe.Slice((*int8)(unsafe.Pointer(&weightData[qsOffset])), blockSize)
-						blockSum := dotProductINT8SIMD(inputSlice, weightSlice, blockSize)
-
-						sum += float32(blockSum) * scale * inputScale
-					}
-
-					dst[i*outDim+j] = sum
-				}
-			}
-		}(j0, j1)
+		pool.workQueue <- matmulJob{
+			dst:          dst,
+			weightData:   weightData,
+			scales:       scales,
+			input:        input,
+			batch:        batch,
+			inDim:        inDim,
+			outDim:       outDim,
+			blocksPerRow: blocksPerRow,
+			bytesPerRow:  bytesPerRow,
+			j0:           j0,
+			j1:           j1,
+		}
 	}
 
-	wg.Wait()
+	pool.wg.Wait()
 }
 
