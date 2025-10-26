@@ -55,10 +55,10 @@ go test -bench=BenchmarkMatMul -cpuprofile=cpu.prof ./internal/kernels
    - Uses BPE (Byte Pair Encoding) algorithm, not Unigram (despite name)
    - BPE merge selection: highest score wins; ties broken by rightmost position (llama.cpp compatibility)
    - Byte fallback tokens at indices 238-493 (formula: byte value + 238)
+   - Smart space preprocessing: single spaces → metaspace `▁`, consecutive spaces (2+) → raw spaces for multi-space vocab tokens
    - Special token handling via metadata, not string matching
    - Normalization pipeline: NFKC → accent removal → lowercase
-   - Token ID validation: 94.4% compatibility (34/36 tests pass vs llama.cpp)
-   - Known limitation: Consecutive spaces (2+ spaces) use metaspace tokens instead of multi-space vocab tokens
+   - Token ID validation: **100% compatibility** (36/36 tests pass vs llama.cpp)
 
 3. **Kernels (`internal/kernels/`)** - Pure-Go math operations with SIMD
    - `matmul.go`: Matrix multiplication with GGML semantics (weight @ input.T)

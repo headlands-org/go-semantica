@@ -101,11 +101,10 @@ func (t *Tokenizer) Encode(text string) ([]int, error) {
 	text = t.normalizer.Normalize(text)
 
 	// SentencePiece preprocessing: replace spaces with meta-space character
-	// NOTE: This simple replacement doesn't match llama.cpp's behavior for consecutive spaces.
-	// llama.cpp has special vocab tokens for multiple spaces (token 138 = "  ", 139 = "   ")
-	// and appears to handle them BEFORE metaspace conversion. This causes minor differences
-	// in edge cases with multiple consecutive spaces, but works correctly for normal text.
-	text = strings.ReplaceAll(text, " ", "▁")
+	// Special handling: consecutive spaces (2+) are kept as raw spaces for BPE matching
+	// of multi-space vocab tokens (token 138 = "  ", 139 = "   "), while single spaces
+	// between words are converted to metaspace "▁"
+	text = t.preprocessSpaces(text)
 
 	// Tokenize using BPE
 	tokens := t.tokenizeBPE(text)
@@ -155,6 +154,62 @@ func (t *Tokenizer) Decode(ids []int) (string, error) {
 	}
 
 	return result.String(), nil
+}
+
+// preprocessSpaces converts spaces to metaspaces, but keeps consecutive spaces as raw spaces
+// for proper BPE matching of multi-space vocab tokens (token 138 = "  ", 139 = "   ", etc.)
+func (t *Tokenizer) preprocessSpaces(text string) string {
+	if text == "" {
+		return text
+	}
+
+	var result strings.Builder
+	result.Grow(len(text))
+
+	inSpaceRun := false
+	spaceRunStart := 0
+
+	for i, r := range text {
+		if r == ' ' {
+			if !inSpaceRun {
+				// Start of a space run
+				inSpaceRun = true
+				spaceRunStart = i
+			}
+			// Continue collecting spaces
+		} else {
+			// Non-space character
+			if inSpaceRun {
+				// End of space run - decide how to handle it
+				spaceCount := i - spaceRunStart
+				if spaceCount == 1 {
+					// Single space: convert to metaspace
+					result.WriteRune('▁')
+				} else {
+					// Multiple consecutive spaces: keep as raw spaces for BPE
+					for j := 0; j < spaceCount; j++ {
+						result.WriteRune(' ')
+					}
+				}
+				inSpaceRun = false
+			}
+			result.WriteRune(r)
+		}
+	}
+
+	// Handle trailing spaces
+	if inSpaceRun {
+		spaceCount := len(text) - spaceRunStart
+		if spaceCount == 1 {
+			result.WriteRune('▁')
+		} else {
+			for j := 0; j < spaceCount; j++ {
+				result.WriteRune(' ')
+			}
+		}
+	}
+
+	return result.String()
 }
 
 // tokenizeBPE performs Byte Pair Encoding tokenization
