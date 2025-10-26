@@ -1,0 +1,24 @@
+File: profile-runtime
+Type: alloc_objects
+Time: 2025-10-25 19:59:45 MDT
+Showing nodes accounting for 10890265, 99.87% of 10904427 total
+Dropped 33 nodes (cum <= 54522)
+      flat  flat%   sum%        cum   cum%
+   9545069 87.53% 87.53%    9545069 87.53%  github.com/lth/pure-go-llamas/internal/tokenizer.(*Tokenizer).tokenizeBPE.func1 (inline)
+    622604  5.71% 93.24%     622604  5.71%  github.com/lth/pure-go-llamas/internal/gguf.(*Reader).readMetadataValue
+    308981  2.83% 96.08%     308981  2.83%  github.com/lth/pure-go-llamas/internal/kernels.QuantizeSymmetricINT8
+    257996  2.37% 98.44%     332837  3.05%  github.com/lth/pure-go-llamas/internal/runtime.(*Model).runAttentionINT8
+     78858  0.72% 99.17%     690232  6.33%  github.com/lth/pure-go-llamas/internal/runtime.(*Model).ForwardINT8
+     43692   0.4% 99.57%     123846  1.14%  github.com/lth/pure-go-llamas/internal/runtime.(*Model).runMLPINT8
+     25783  0.24% 99.80%    9570852 87.77%  github.com/lth/pure-go-llamas/internal/tokenizer.(*Tokenizer).tokenizeBPE
+      5461  0.05% 99.85%   10269854 94.18%  github.com/lth/pure-go-llamas/pkg/ggufembed.(*embedRuntime).Embed.func1
+      1820 0.017% 99.87%    9574161 87.80%  github.com/lth/pure-go-llamas/internal/tokenizer.(*Tokenizer).Encode
+         1 9.2e-06% 99.87%     623733  5.72%  github.com/lth/pure-go-llamas/internal/runtime.LoadModel
+         0     0% 99.87%     622604  5.71%  github.com/lth/pure-go-llamas/internal/gguf.(*Reader).parse
+         0     0% 99.87%     622604  5.71%  github.com/lth/pure-go-llamas/internal/gguf.(*Reader).readMetadata
+         0     0% 99.87%     622604  5.71%  github.com/lth/pure-go-llamas/internal/gguf.Open
+         0     0% 99.87%     690232  6.33%  github.com/lth/pure-go-llamas/internal/runtime.(*Model).Forward (inline)
+         0     0% 99.87%   10264393 94.13%  github.com/lth/pure-go-llamas/pkg/ggufembed.(*embedRuntime).embedSingle
+         0     0% 99.87%     623733  5.72%  github.com/lth/pure-go-llamas/pkg/ggufembed.Open
+         0     0% 99.87%     627830  5.76%  main.main
+         0     0% 99.87%     627830  5.76%  runtime.main

@@ -29,7 +29,7 @@ func TestEmbeddingGemmaFullPipeline(t *testing.T) {
 
 	// 1. Load the model
 	t.Log("Loading EmbeddingGemma model...")
-	model, err := LoadModel(gemmaModelPath)
+	model, err := LoadModel(gemmaModelPath, false)
 	if err != nil {
 		t.Skipf("EmbeddingGemma model not available: %v", err)
 	}

@@ -22,7 +22,7 @@ func TestMemoryUsage(t *testing.T) {
 	t.Logf("  HeapAlloc: %.2f MB", float64(m1.HeapAlloc)/1024/1024)
 
 	// Load model
-	model, err := LoadModel(gemmaModelPath)
+	model, err := LoadModel(gemmaModelPath, false)
 	if err != nil {
 		t.Skipf("Model not available: %v", err)
 	}
@@ -81,7 +81,7 @@ func BenchmarkMemoryForward(b *testing.B) {
 		b.Skip("Skipping benchmark in short mode")
 	}
 
-	model, err := LoadModel(gemmaModelPath)
+	model, err := LoadModel(gemmaModelPath, false)
 	if err != nil {
 		b.Skipf("Model not available: %v", err)
 	}

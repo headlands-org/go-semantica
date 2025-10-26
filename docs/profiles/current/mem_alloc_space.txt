@@ -1,0 +1,25 @@
+File: profile-runtime
+Type: alloc_space
+Time: 2025-10-25 19:59:45 MDT
+Showing nodes accounting for 7080.02MB, 98.93% of 7156.49MB total
+Dropped 32 nodes (cum <= 35.78MB)
+      flat  flat%   sum%        cum   cum%
+ 4045.96MB 56.54% 56.54%  4045.96MB 56.54%  github.com/lth/pure-go-llamas/internal/kernels.QuantizeSymmetricINT8
+ 1861.47MB 26.01% 82.55%  1861.47MB 26.01%  github.com/lth/pure-go-llamas/internal/tokenizer.(*Tokenizer).tokenizeBPE.func1 (inline)
+     656MB  9.17% 91.71%      656MB  9.17%  github.com/lth/pure-go-llamas/internal/runtime.newBufferPool.func1
+     318MB  4.44% 96.16%      318MB  4.44%  github.com/lth/pure-go-llamas/internal/runtime.LoadModel.func3
+      60MB  0.84% 97.00%   118.22MB  1.65%  github.com/lth/pure-go-llamas/internal/runtime.LoadModel
+      48MB  0.67% 97.67%       48MB  0.67%  github.com/lth/pure-go-llamas/internal/runtime.LoadModel.func1
+      48MB  0.67% 98.34%       48MB  0.67%  github.com/lth/pure-go-llamas/internal/runtime.LoadModel.func2
+   16.50MB  0.23% 98.57%  1212.74MB 16.95%  github.com/lth/pure-go-llamas/internal/runtime.(*Model).runAttentionINT8
+   12.56MB  0.18% 98.74%  1874.03MB 26.19%  github.com/lth/pure-go-llamas/internal/tokenizer.(*Tokenizer).tokenizeBPE
+   10.52MB  0.15% 98.89%  5158.08MB 72.08%  github.com/lth/pure-go-llamas/internal/runtime.(*Model).ForwardINT8
+       2MB 0.028% 98.92%  1373.02MB 19.19%  github.com/lth/pure-go-llamas/internal/runtime.(*Model).runMLPINT8
+    0.50MB 0.007% 98.92%  1875.03MB 26.20%  github.com/lth/pure-go-llamas/internal/tokenizer.(*Tokenizer).Encode
+    0.50MB 0.007% 98.93%  7033.61MB 98.28%  github.com/lth/pure-go-llamas/pkg/ggufembed.(*embedRuntime).Embed.func1
+         0     0% 98.93%  5158.08MB 72.08%  github.com/lth/pure-go-llamas/internal/runtime.(*Model).Forward (inline)
+         0     0% 98.93%  7033.11MB 98.28%  github.com/lth/pure-go-llamas/pkg/ggufembed.(*embedRuntime).embedSingle
+         0     0% 98.93%   118.22MB  1.65%  github.com/lth/pure-go-llamas/pkg/ggufembed.Open
+         0     0% 98.93%   119.88MB  1.68%  main.main
+         0     0% 98.93%   119.88MB  1.68%  runtime.main
+         0     0% 98.93%     1070MB 14.95%  sync.(*Pool).Get

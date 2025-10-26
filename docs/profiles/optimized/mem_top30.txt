@@ -1,0 +1,37 @@
+File: profile-runtime
+Type: inuse_space
+Time: 2025-10-25 20:05:11 MDT
+Showing nodes accounting for 357.77MB, 99.54% of 359.42MB total
+Dropped 10 nodes (cum <= 1.80MB)
+Showing top 30 nodes out of 32
+      flat  flat%   sum%        cum   cum%
+     164MB 45.63% 45.63%      164MB 45.63%  github.com/lth/pure-go-llamas/internal/runtime.newBufferPool.func1
+      60MB 16.69% 62.32%   103.33MB 28.75%  github.com/lth/pure-go-llamas/internal/runtime.LoadModel
+      54MB 15.02% 77.35%       54MB 15.02%  github.com/lth/pure-go-llamas/internal/runtime.LoadModel.func3
+   21.50MB  5.98% 83.33%    21.50MB  5.98%  github.com/lth/pure-go-llamas/internal/gguf.(*Reader).readMetadataValue
+   14.35MB  3.99% 87.32%    14.35MB  3.99%  github.com/lth/pure-go-llamas/internal/tokenizer.New
+      12MB  3.34% 90.66%       12MB  3.34%  github.com/lth/pure-go-llamas/internal/runtime.LoadModel.func1
+      12MB  3.34% 94.00%       12MB  3.34%  github.com/lth/pure-go-llamas/internal/runtime.LoadModel.func2
+   10.43MB  2.90% 96.90%    10.43MB  2.90%  github.com/lth/pure-go-llamas/internal/runtime.extractQ8_0Scales
+    5.16MB  1.44% 98.34%    19.51MB  5.43%  github.com/lth/pure-go-llamas/internal/tokenizer.LoadFromGGUF
+    2.31MB  0.64% 98.98%     2.31MB  0.64%  github.com/lth/pure-go-llamas/internal/kernels.NewRoPECache
+       2MB  0.56% 99.54%        2MB  0.56%  runtime.allocm
+         0     0% 99.54%    21.50MB  5.98%  github.com/lth/pure-go-llamas/internal/gguf.(*Reader).parse
+         0     0% 99.54%    21.50MB  5.98%  github.com/lth/pure-go-llamas/internal/gguf.(*Reader).readMetadata
+         0     0% 99.54%    21.50MB  5.98%  github.com/lth/pure-go-llamas/internal/gguf.Open
+         0     0% 99.54%   252.43MB 70.23%  github.com/lth/pure-go-llamas/internal/runtime.(*Model).Forward (inline)
+         0     0% 99.54%   252.43MB 70.23%  github.com/lth/pure-go-llamas/internal/runtime.(*Model).ForwardINT8
+         0     0% 99.54%    10.43MB  2.90%  github.com/lth/pure-go-llamas/internal/runtime.(*Model).ForwardINT8.func1
+         0     0% 99.54%    10.43MB  2.90%  github.com/lth/pure-go-llamas/internal/runtime.(*Model).loadLayerINT8
+         0     0% 99.54%       54MB 15.02%  github.com/lth/pure-go-llamas/internal/runtime.(*Model).runAttentionINT8
+         0     0% 99.54%   252.43MB 70.23%  github.com/lth/pure-go-llamas/pkg/ggufembed.(*embedRuntime).Embed.func1
+         0     0% 99.54%   252.43MB 70.23%  github.com/lth/pure-go-llamas/pkg/ggufembed.(*embedRuntime).embedSingle
+         0     0% 99.54%   103.33MB 28.75%  github.com/lth/pure-go-llamas/pkg/ggufembed.Open
+         0     0% 99.54%   104.49MB 29.07%  main.main
+         0     0% 99.54%   104.99MB 29.21%  runtime.main
+         0     0% 99.54%        2MB  0.56%  runtime.newm
+         0     0% 99.54%        2MB  0.56%  runtime.resetspinning
+         0     0% 99.54%        2MB  0.56%  runtime.schedule
+         0     0% 99.54%        2MB  0.56%  runtime.startm
+         0     0% 99.54%        2MB  0.56%  runtime.wakep
+         0     0% 99.54%    10.43MB  2.90%  sync.(*Once).Do (inline)

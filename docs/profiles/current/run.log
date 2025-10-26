@@ -1,0 +1,36 @@
+=== Profiling Configuration ===
+Model: model/embeddinggemma-300m-Q8_0.gguf
+Batch Size: 32
+Workers: 8 (NumCPU: 8)
+DisableMatmulParallel: false
+Iterations: 100
+CPU Profile: docs/profiles/current/cpu.pprof
+Memory Profile: docs/profiles/current/mem.pprof
+================================
+
+Model loaded: embed_dim=768, max_seq_len=2048
+
+Running warmup...
+Warmup complete
+
+CPU profiling started: docs/profiles/current/cpu.pprof
+Running 100 iterations...
+  Completed 10/100 iterations
+  Completed 20/100 iterations
+  Completed 30/100 iterations
+  Completed 40/100 iterations
+  Completed 50/100 iterations
+  Completed 60/100 iterations
+  Completed 70/100 iterations
+  Completed 80/100 iterations
+  Completed 90/100 iterations
+  Completed 100/100 iterations
+
+Benchmark complete!
+Total time: 7m13.8389375s
+Avg time per iteration: 4.338389375s
+Avg time per text: 135.574667ms
+
+Memory profile written: docs/profiles/current/mem.pprof
+
+Profile collection complete!

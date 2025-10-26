@@ -4,6 +4,7 @@ package runtime
 import (
 	"fmt"
 	"math"
+	"sync"
 
 	"github.com/lth/pure-go-llamas/internal/gguf"
 	"github.com/lth/pure-go-llamas/internal/kernels"
@@ -42,7 +43,9 @@ type Model struct {
 	layers []Layer // DEPRECATED: not loaded (uses too much memory)
 
 	// INT8 layers (loaded lazily for zero-copy)
-	layersINT8 []*LayerINT8
+	layersINT8     []*LayerINT8
+	layersINT8Once sync.Once
+	layersINT8Err  error // Store error from lazy loading
 
 	// Final normalization (Gemma-specific)
 	outputNormWeight []float32 // [embDim]
@@ -52,7 +55,15 @@ type Model struct {
 
 	// Buffers for inference (reusable scratch space)
 	scratch    []float32
-	bufferPool *BufferPool
+	bufferPool *sync.Pool // Pool of BufferPool instances for thread safety
+
+	// Buffer pools for hot path allocations (reduce GC pressure)
+	hiddenPool   *sync.Pool
+	residualPool *sync.Pool
+	tempPool     *sync.Pool // For temporary allocations (kExpanded, vExpanded, etc.)
+
+	// Configuration flags
+	disableMatmulParallel bool
 }
 
 // BufferPool manages pre-allocated buffers for inference
@@ -67,8 +78,8 @@ type BufferPool struct {
 	mlpOffset     int // MLP gate/up
 }
 
-// newBufferPool creates a buffer pool for the given configuration
-func newBufferPool(cfg ModelConfig) *BufferPool {
+// newBufferPool creates a sync.Pool that returns per-goroutine buffers
+func newBufferPool(cfg ModelConfig) *sync.Pool {
 	maxSeqLen := cfg.MaxSeqLen
 	embDim := cfg.EmbedDim
 	kvDim := cfg.NumKVHeads * cfg.HeadDim
@@ -92,16 +103,20 @@ func newBufferPool(cfg ModelConfig) *BufferPool {
 	mlpOffset := offset
 	offset += mlpSize
 
-	// Allocate single large buffer
+	// Total size for buffer
 	totalSize := offset
-	buffer := make([]float32, totalSize)
 
-	return &BufferPool{
-		buffer:        buffer,
-		qkvOffset:     qkvOffset,
-		attnOffset:    attnOffset,
-		scratchOffset: scratchOffset,
-		mlpOffset:     mlpOffset,
+	// Return a sync.Pool that creates new BufferPool instances on demand
+	return &sync.Pool{
+		New: func() interface{} {
+			return &BufferPool{
+				buffer:        make([]float32, totalSize),
+				qkvOffset:     qkvOffset,
+				attnOffset:    attnOffset,
+				scratchOffset: scratchOffset,
+				mlpOffset:     mlpOffset,
+			}
+		},
 	}
 }
 
@@ -126,7 +141,7 @@ type Layer struct {
 }
 
 // LoadModel loads a GGUF model from file
-func LoadModel(path string) (*Model, error) {
+func LoadModel(path string, disableMatmulParallel bool) (*Model, error) {
 	reader, err := gguf.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open gguf: %w", err)
@@ -147,10 +162,11 @@ func LoadModel(path string) (*Model, error) {
 	}
 
 	model := &Model{
-		config:    config,
-		reader:    reader,
-		tokenizer: tok,
-		layers:    make([]Layer, config.NumLayers),
+		config:                config,
+		reader:                reader,
+		tokenizer:             tok,
+		layers:                make([]Layer, config.NumLayers),
+		disableMatmulParallel: disableMatmulParallel,
 	}
 
 	// Load model weights
@@ -171,6 +187,24 @@ func LoadModel(path string) (*Model, error) {
 
 	// Initialize buffer pool for inference
 	model.bufferPool = newBufferPool(config)
+
+	// Initialize hot path buffer pools to reduce GC pressure
+	model.hiddenPool = &sync.Pool{
+		New: func() interface{} {
+			return make([]float32, config.MaxSeqLen*config.EmbedDim)
+		},
+	}
+	model.residualPool = &sync.Pool{
+		New: func() interface{} {
+			return make([]float32, config.MaxSeqLen*config.EmbedDim)
+		},
+	}
+	model.tempPool = &sync.Pool{
+		New: func() interface{} {
+			// Size for largest temporary allocation (kExpanded/vExpanded for GQA)
+			return make([]float32, config.MaxSeqLen*config.EmbedDim)
+		},
+	}
 
 	return model, nil
 }

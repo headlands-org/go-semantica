@@ -36,7 +36,7 @@ func TestEmbeddingGemmaVsLlamaCpp(t *testing.T) {
 
 	// Load and run our model
 	t.Log("\nLoading our model...")
-	model, err := LoadModel(gemmaModelPath)
+	model, err := LoadModel(gemmaModelPath, false)
 	if err != nil {
 		t.Skipf("EmbeddingGemma model not available: %v", err)
 	}

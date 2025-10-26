@@ -1,0 +1,38 @@
+File: profile-runtime
+Type: cpu
+Time: 2025-10-25 19:59:49 MDT
+Duration: 323.01s, Total samples = 765.74s (237.06%)
+Showing nodes accounting for 761.05s, 99.39% of 765.74s total
+Dropped 193 nodes (cum <= 3.83s)
+Showing top 30 nodes out of 40
+      flat  flat%   sum%        cum   cum%
+   413.58s 54.01% 54.01%    413.58s 54.01%  runtime.pthread_cond_wait
+   172.50s 22.53% 76.54%    172.50s 22.53%  runtime.pthread_cond_signal
+    72.74s  9.50% 86.04%     72.74s  9.50%  github.com/lth/pure-go-llamas/internal/kernels.dotProductSDOTAsm
+    52.11s  6.81% 92.84%    133.76s 17.47%  github.com/lth/pure-go-llamas/internal/kernels.(*matmulWorkerPool).processJob
+    18.67s  2.44% 95.28%     18.67s  2.44%  runtime.memclrNoHeapPointers
+    14.33s  1.87% 97.15%     14.62s  1.91%  github.com/lth/pure-go-llamas/internal/kernels.MultiHeadAttentionWithScale
+     8.84s  1.15% 98.31%     81.59s 10.66%  github.com/lth/pure-go-llamas/internal/kernels.dotProductINT8Asm (inline)
+     6.43s  0.84% 99.15%      6.43s  0.84%  runtime.usleep
+     1.74s  0.23% 99.37%     20.36s  2.66%  github.com/lth/pure-go-llamas/internal/kernels.QuantizeSymmetricINT8
+     0.02s 0.0026% 99.38%      4.86s  0.63%  runtime.lock2
+     0.02s 0.0026% 99.38%    426.29s 55.67%  runtime.schedule
+     0.01s 0.0013% 99.38%     36.55s  4.77%  github.com/lth/pure-go-llamas/internal/runtime.(*Model).ForwardINT8
+     0.01s 0.0013% 99.38%     29.67s  3.87%  github.com/lth/pure-go-llamas/internal/runtime.(*Model).runAttentionINT8
+     0.01s 0.0013% 99.38%    418.25s 54.62%  runtime.findRunnable
+     0.01s 0.0013% 99.38%     15.24s  1.99%  runtime.mallocgcSmallNoscan
+     0.01s 0.0013% 99.38%    165.21s 21.58%  runtime.ready
+     0.01s 0.0013% 99.39%        77s 10.06%  runtime.readyWithTime.goready.func1
+     0.01s 0.0013% 99.39%     88.10s 11.51%  runtime.send.goready.func1
+         0     0% 99.39%    135.90s 17.75%  github.com/lth/pure-go-llamas/internal/kernels.(*matmulWorkerPool).worker
+         0     0% 99.39%     36.55s  4.77%  github.com/lth/pure-go-llamas/internal/runtime.(*Model).Forward (inline)
+         0     0% 99.39%      5.63s  0.74%  github.com/lth/pure-go-llamas/internal/runtime.(*Model).runMLPINT8
+         0     0% 99.39%     36.82s  4.81%  github.com/lth/pure-go-llamas/pkg/ggufembed.(*embedRuntime).Embed.func1
+         0     0% 99.39%     36.81s  4.81%  github.com/lth/pure-go-llamas/pkg/ggufembed.(*embedRuntime).embedSingle
+         0     0% 99.39%      4.86s  0.63%  runtime.lock (partial-inline)
+         0     0% 99.39%      4.86s  0.63%  runtime.lockWithRank (inline)
+         0     0% 99.39%    413.56s 54.01%  runtime.mPark (inline)
+         0     0% 99.39%     18.67s  2.44%  runtime.makeslice
+         0     0% 99.39%     18.94s  2.47%  runtime.mallocgc
+         0     0% 99.39%    426.33s 55.68%  runtime.mcall
+         0     0% 99.39%    413.56s 54.01%  runtime.notesleep

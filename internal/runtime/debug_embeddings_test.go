@@ -13,7 +13,7 @@ func TestDebugTokenEmbeddings(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	model, err := LoadModel(gemmaModelPath)
+	model, err := LoadModel(gemmaModelPath, false)
 	if err != nil {
 		t.Skipf("Model not available: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestDebugNormWeights(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	model, err := LoadModel(gemmaModelPath)
+	model, err := LoadModel(gemmaModelPath, false)
 	if err != nil {
 		t.Skipf("Model not available: %v", err)
 	}

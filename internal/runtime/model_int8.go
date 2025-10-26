@@ -149,21 +149,37 @@ func (m *Model) ForwardINT8(tokenIDs []int) ([]float32, error) {
 
 	embDim := m.config.EmbedDim
 
-	// Load INT8 layers lazily (only once, then cache)
-	if m.layersINT8 == nil {
+	// Load INT8 layers lazily (only once, then cache) - thread-safe with sync.Once
+	m.layersINT8Once.Do(func() {
 		m.layersINT8 = make([]*LayerINT8, m.config.NumLayers)
 		for i := 0; i < m.config.NumLayers; i++ {
 			layer, err := m.loadLayerINT8(i)
 			if err != nil {
-				return nil, fmt.Errorf("load INT8 layer %d: %w", i, err)
+				m.layersINT8Err = fmt.Errorf("load INT8 layer %d: %w", i, err)
+				return
 			}
 			m.layersINT8[i] = layer
 		}
+	})
+
+	// Check if lazy loading failed
+	if m.layersINT8Err != nil {
+		return nil, m.layersINT8Err
 	}
 
-	// Allocate activations (start as FP32)
-	hidden := make([]float32, seqLen*embDim)
-	residual := make([]float32, seqLen*embDim)
+	// Acquire buffer pool for inference scratch space
+	buf := m.bufferPool.Get().(*BufferPool)
+	defer m.bufferPool.Put(buf)
+
+	// Acquire hidden and residual buffers from pools (reduce GC pressure)
+	hiddenBuf := m.hiddenPool.Get().([]float32)
+	defer m.hiddenPool.Put(hiddenBuf)
+	residualBuf := m.residualPool.Get().([]float32)
+	defer m.residualPool.Put(residualBuf)
+
+	// Use slices of the pooled buffers sized for this sequence
+	hidden := hiddenBuf[:seqLen*embDim]
+	residual := residualBuf[:seqLen*embDim]
 
 	// Embed tokens (on-the-fly Q8_0 dequantization for zero-copy)
 	bytesPerRow := ((embDim + 31) / 32) * 34 // Q8_0: (numBlocks * 34 bytes)
@@ -207,7 +223,7 @@ func (m *Model) ForwardINT8(tokenIDs []int) ([]float32, error) {
 		hiddenINT8 := kernels.QuantizeSymmetricINT8(hidden, seqLen, embDim)
 
 		// Run attention with INT8
-		m.runAttentionINT8(hidden, &hiddenINT8, layer, seqLen)
+		m.runAttentionINT8(hidden, &hiddenINT8, layer, seqLen, buf)
 
 		// Post-attention norm if present
 		if len(layer.attnPostNormWeight) > 0 {
@@ -245,7 +261,7 @@ func (m *Model) ForwardINT8(tokenIDs []int) ([]float32, error) {
 		hiddenINT8 = kernels.QuantizeSymmetricINT8(hidden, seqLen, embDim)
 
 		// Run MLP with INT8
-		m.runMLPINT8(hidden, &hiddenINT8, layer, seqLen)
+		m.runMLPINT8(hidden, &hiddenINT8, layer, seqLen, buf)
 
 		// Post-FFN norm if present
 		if len(layer.ffnPostNormWeight) > 0 {
@@ -290,18 +306,17 @@ func (m *Model) ForwardINT8(tokenIDs []int) ([]float32, error) {
 }
 
 // runAttentionINT8 runs attention with INT8 activations
-func (m *Model) runAttentionINT8(output []float32, hiddenINT8 *kernels.QuantizedTensorINT8, layer *LayerINT8, seqLen int) {
+func (m *Model) runAttentionINT8(output []float32, hiddenINT8 *kernels.QuantizedTensorINT8, layer *LayerINT8, seqLen int, buf *BufferPool) {
 	embDim := m.config.EmbedDim
 	nHeads := m.config.NumHeads
 	nKVHeads := m.config.NumKVHeads
 	headDim := m.config.HeadDim
 	kvDim := nKVHeads * headDim
 
-	// Use pre-allocated buffers from pool
-	pool := m.bufferPool
-	q := pool.buffer[pool.qkvOffset : pool.qkvOffset+seqLen*embDim]
-	k := pool.buffer[pool.qkvOffset+seqLen*embDim : pool.qkvOffset+seqLen*embDim+seqLen*kvDim]
-	v := pool.buffer[pool.qkvOffset+seqLen*embDim+seqLen*kvDim : pool.qkvOffset+seqLen*embDim+seqLen*kvDim*2]
+	// Use pre-allocated buffers from the provided buffer pool
+	q := buf.buffer[buf.qkvOffset : buf.qkvOffset+seqLen*embDim]
+	k := buf.buffer[buf.qkvOffset+seqLen*embDim : buf.qkvOffset+seqLen*embDim+seqLen*kvDim]
+	v := buf.buffer[buf.qkvOffset+seqLen*embDim+seqLen*kvDim : buf.qkvOffset+seqLen*embDim+seqLen*kvDim*2]
 
 	// Project using INT8 x Q8_0 matmul (raw bytes, zero-copy)
 	kernels.MatMulQ8_0INT8(q, layer.qWeightQ8, layer.qWeightScales, hiddenINT8, seqLen, embDim, embDim)
@@ -339,9 +354,14 @@ func (m *Model) runAttentionINT8(output []float32, hiddenINT8 *kernels.Quantized
 
 	// For GQA, expand K, V
 	var kExpanded, vExpanded []float32
+	var kExpandedBuf, vExpandedBuf []float32
 	if nKVHeads < nHeads {
-		kExpanded = make([]float32, seqLen*embDim)
-		vExpanded = make([]float32, seqLen*embDim)
+		// Acquire temporary buffers from pool (reduce GC pressure)
+		kExpandedBuf = m.tempPool.Get().([]float32)
+		vExpandedBuf = m.tempPool.Get().([]float32)
+
+		kExpanded = kExpandedBuf[:seqLen*embDim]
+		vExpanded = vExpandedBuf[:seqLen*embDim]
 		groupSize := nHeads / nKVHeads
 
 		for s := 0; s < seqLen; s++ {
@@ -362,8 +382,8 @@ func (m *Model) runAttentionINT8(output []float32, hiddenINT8 *kernels.Quantized
 	}
 
 	// Run attention (FP32) - use pre-allocated buffers
-	attnOut := pool.buffer[pool.attnOffset : pool.attnOffset+seqLen*embDim]
-	attnScratch := pool.buffer[pool.scratchOffset : pool.scratchOffset+seqLen*seqLen*nHeads]
+	attnOut := buf.buffer[buf.attnOffset : buf.attnOffset+seqLen*embDim]
+	attnScratch := buf.buffer[buf.scratchOffset : buf.scratchOffset+seqLen*seqLen*nHeads]
 	kernels.MultiHeadAttentionWithScale(attnOut, q, kExpanded, vExpanded, 1, seqLen, nHeads, headDim, nil, m.config.AttentionScale, attnScratch)
 
 	// Quantize attention output
@@ -371,17 +391,24 @@ func (m *Model) runAttentionINT8(output []float32, hiddenINT8 *kernels.Quantized
 
 	// Project output with INT8 (raw bytes, zero-copy)
 	kernels.MatMulQ8_0INT8(output, layer.oWeightQ8, layer.oWeightScales, &attnOutINT8, seqLen, embDim, embDim)
+
+	// Return temporary buffers to pool if they were allocated
+	if kExpandedBuf != nil {
+		m.tempPool.Put(kExpandedBuf)
+	}
+	if vExpandedBuf != nil {
+		m.tempPool.Put(vExpandedBuf)
+	}
 }
 
 // runMLPINT8 runs MLP with INT8 activations
-func (m *Model) runMLPINT8(output []float32, hiddenINT8 *kernels.QuantizedTensorINT8, layer *LayerINT8, seqLen int) {
+func (m *Model) runMLPINT8(output []float32, hiddenINT8 *kernels.QuantizedTensorINT8, layer *LayerINT8, seqLen int, buf *BufferPool) {
 	embDim := m.config.EmbedDim
 	intermDim := m.config.IntermDim
 
-	// Use pre-allocated buffers from pool (FP32)
-	pool := m.bufferPool
-	gate := pool.buffer[pool.mlpOffset : pool.mlpOffset+seqLen*intermDim]
-	up := pool.buffer[pool.mlpOffset+seqLen*intermDim : pool.mlpOffset+seqLen*intermDim*2]
+	// Use pre-allocated buffers from the provided buffer pool (FP32)
+	gate := buf.buffer[buf.mlpOffset : buf.mlpOffset+seqLen*intermDim]
+	up := buf.buffer[buf.mlpOffset+seqLen*intermDim : buf.mlpOffset+seqLen*intermDim*2]
 
 	// Gate and up projections with INT8 (raw bytes, zero-copy)
 	kernels.MatMulQ8_0INT8(gate, layer.gateWeightQ8, layer.gateWeightScales, hiddenINT8, seqLen, embDim, intermDim)
