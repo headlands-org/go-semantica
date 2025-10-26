@@ -101,6 +101,10 @@ func (t *Tokenizer) Encode(text string) ([]int, error) {
 	text = t.normalizer.Normalize(text)
 
 	// SentencePiece preprocessing: replace spaces with meta-space character
+	// NOTE: This simple replacement doesn't match llama.cpp's behavior for consecutive spaces.
+	// llama.cpp has special vocab tokens for multiple spaces (token 138 = "  ", 139 = "   ")
+	// and appears to handle them BEFORE metaspace conversion. This causes minor differences
+	// in edge cases with multiple consecutive spaces, but works correctly for normal text.
 	text = strings.ReplaceAll(text, " ", "▁")
 
 	// Tokenize using BPE
@@ -264,13 +268,14 @@ func (t *Tokenizer) tokenizeBPE(text string) []string {
 			final = append(final, token)
 		} else {
 			// Token not in vocab, try byte tokens or use UNK
-			hasByteTokens := len(t.vocab) > 236255 // Gemma models have byte tokens at 236000-236255
+			// Byte tokens are at indices 238-493 (one per byte value 0x00-0xFF)
+			hasByteTokens := len(t.vocab) > 493
 			if hasByteTokens {
-				// Output as byte tokens (Gemma-style)
+				// Output as byte tokens: byte value B → token index 238+B
 				for _, b := range []byte(token) {
-					byteToken := t.vocab[int(b)+236000]
-					if byteToken != "" {
-						final = append(final, byteToken)
+					byteTokenID := 238 + int(b)
+					if byteTokenID < len(t.vocab) {
+						final = append(final, t.vocab[byteTokenID])
 					}
 				}
 			} else {

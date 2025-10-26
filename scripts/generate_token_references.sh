@@ -92,8 +92,8 @@ test_cases=(
 
     # Whitespace
     "  spaces  |Whitespace: leading and trailing"
-    "new\nlines|Whitespace: newline character"
-    "tab\there|Whitespace: tab character"
+    $'new\nlines|Whitespace: newline character'
+    $'tab\there|Whitespace: tab character'
     "multiple   spaces|Whitespace: multiple spaces"
 
     # Special characters

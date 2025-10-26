@@ -126,9 +126,9 @@ func TestTokenizerVocabSize(t *testing.T) {
 }
 
 func TestBytefallbackTokens(t *testing.T) {
-	// Create a vocab with byte fallback tokens at 236000-236255
-	// This simulates the Gemma model structure
-	vocabSize := 236256
+	// Create a vocab with byte fallback tokens at 238-493
+	// This matches the actual Gemma model structure
+	vocabSize := 494
 	vocab := make([]string, vocabSize)
 	scores := make([]float32, vocabSize)
 	tokenTypes := make([]TokenType, vocabSize)
@@ -153,17 +153,17 @@ func TestBytefallbackTokens(t *testing.T) {
 	tokenTypes[1] = TokenControl
 	tokenTypes[2] = TokenControl
 
-	// Fill remaining tokens with dummy values
-	for i := 10; i < vocabSize; i++ {
+	// Fill tokens 10-237 with dummy values
+	for i := 10; i < 238; i++ {
 		vocab[i] = fmt.Sprintf("<token_%d>", i)
 		scores[i] = 0.0
 		tokenTypes[i] = TokenNormal
 	}
 
-	// Set up byte fallback tokens at 236000-236255
+	// Set up byte fallback tokens at 238-493
 	// These represent individual bytes (0x00 to 0xFF)
 	for b := 0; b < 256; b++ {
-		idx := 236000 + b
+		idx := 238 + b
 		// Use a representation that shows this is a byte token
 		vocab[idx] = fmt.Sprintf("<0x%02X>", b)
 		scores[idx] = -10.0 // Low score so they're only used as fallback
@@ -227,7 +227,7 @@ func TestBytefallbackTokens(t *testing.T) {
 				// Verify we got byte fallback tokens for the replacement character bytes
 				expectedIDs := make([]int, len(tt.expectBytes))
 				for i, b := range tt.expectBytes {
-					expectedIDs[i] = int(b) + 236000
+					expectedIDs[i] = int(b) + 238
 				}
 
 				if len(ids) != len(expectedIDs) {
@@ -244,8 +244,8 @@ func TestBytefallbackTokens(t *testing.T) {
 					}
 
 					// Verify token ID is in byte fallback range
-					if ids[i] < 236000 || ids[i] > 236255 {
-						t.Errorf("Token ID %d is not in byte fallback range [236000, 236255]", ids[i])
+					if ids[i] < 238 || ids[i] > 493 {
+						t.Errorf("Token ID %d is not in byte fallback range [238, 493]", ids[i])
 					}
 				}
 			})
@@ -280,10 +280,10 @@ func TestBytefallbackTokens(t *testing.T) {
 
 				// Should use byte fallback for unknown control chars
 				if len(ids) > 0 {
-					expectedID := int(tt.char) + 236000
+					expectedID := int(tt.char) + 238
 					// The token might be in vocab or use byte fallback
 					// Just verify it's a valid token
-					if ids[0] >= 236000 && ids[0] <= 236255 {
+					if ids[0] >= 238 && ids[0] <= 493 {
 						if ids[0] != expectedID {
 							t.Errorf("Expected byte token %d for 0x%02X, got %d",
 								expectedID, tt.char, ids[0])
@@ -323,8 +323,8 @@ func TestBytefallbackTokens(t *testing.T) {
 
 				// For byte tokens, verify the token string format
 				for _, id := range ids {
-					if id >= 236000 && id <= 236255 {
-						byteVal := id - 236000
+					if id >= 238 && id <= 493 {
+						byteVal := id - 238
 						expectedToken := fmt.Sprintf("<0x%02X>", byteVal)
 						actualToken := vocab[id]
 						if actualToken != expectedToken {
@@ -340,7 +340,7 @@ func TestBytefallbackTokens(t *testing.T) {
 	t.Run("ByteTokensExistInVocab", func(t *testing.T) {
 		// Verify all byte tokens exist in the vocab
 		for b := 0; b < 256; b++ {
-			id := 236000 + b
+			id := 238 + b
 			if id >= len(vocab) {
 				t.Fatalf("Byte token ID %d exceeds vocab size %d", id, len(vocab))
 			}
@@ -362,7 +362,7 @@ func TestBytefallbackTokens(t *testing.T) {
 			}
 		}
 
-		t.Logf("Verified all 256 byte tokens exist at indices 236000-236255")
+		t.Logf("Verified all 256 byte tokens exist at indices 238-493")
 	})
 
 	t.Run("KnownTokensNotFallback", func(t *testing.T) {
@@ -377,7 +377,7 @@ func TestBytefallbackTokens(t *testing.T) {
 
 		// Should NOT use byte fallback tokens for known words
 		for _, id := range ids {
-			if id >= 236000 && id <= 236255 {
+			if id >= 238 && id <= 493 {
 				t.Errorf("Known token 'hello' should not use byte fallback, got ID %d", id)
 			}
 		}
@@ -398,9 +398,9 @@ func TestBytefallbackTokens(t *testing.T) {
 		// Should have some normal tokens and byte fallback tokens
 		foundNormal := false
 		foundByteToken := false
-		expectedByteTokens := []int{236239, 236191, 236189} // 0xEF, 0xBF, 0xBD + 236000
+		expectedByteTokens := []int{477, 429, 427} // 0xEF, 0xBF, 0xBD + 238
 		for _, id := range ids {
-			if id >= 236000 && id <= 236255 {
+			if id >= 238 && id <= 493 {
 				foundByteToken = true
 				// Verify it's one of the replacement character bytes
 				found := false
@@ -413,7 +413,7 @@ func TestBytefallbackTokens(t *testing.T) {
 				if !found {
 					t.Errorf("Unexpected byte token %d, expected one of %v", id, expectedByteTokens)
 				}
-			} else if id >= 3 && id < 236000 {
+			} else if id >= 3 && id < 238 {
 				foundNormal = true
 			}
 		}
@@ -438,8 +438,8 @@ func TestBytefallbackTokens(t *testing.T) {
 
 	t.Run("VocabSizeCheck", func(t *testing.T) {
 		// Verify the tokenizer has enough tokens for byte fallback
-		if tok.VocabSize() <= 236255 {
-			t.Errorf("Vocab size %d is too small for byte fallback (needs > 236255)",
+		if tok.VocabSize() <= 493 {
+			t.Errorf("Vocab size %d is too small for byte fallback (needs > 493)",
 				tok.VocabSize())
 		}
 		t.Logf("Vocab size: %d (sufficient for byte fallback)", tok.VocabSize())
@@ -458,7 +458,7 @@ func TestBytefallbackTokens(t *testing.T) {
 		t.Logf("Unknown character 'ñ' (UTF-8: 0xC3 0xB1) -> IDs: %v", ids)
 
 		// Should use byte fallback for the two UTF-8 bytes
-		expectedIDs := []int{236195, 236177} // 0xC3 + 236000, 0xB1 + 236000
+		expectedIDs := []int{433, 415} // 0xC3 + 238, 0xB1 + 238
 		if len(ids) != len(expectedIDs) {
 			t.Errorf("Expected %d tokens, got %d", len(expectedIDs), len(ids))
 		}
@@ -471,8 +471,8 @@ func TestBytefallbackTokens(t *testing.T) {
 				t.Errorf("Token %d: expected ID %d, got %d", i, expectedID, ids[i])
 			}
 			// Verify in byte fallback range
-			if ids[i] < 236000 || ids[i] > 236255 {
-				t.Errorf("Token ID %d is not in byte fallback range [236000, 236255]", ids[i])
+			if ids[i] < 238 || ids[i] > 493 {
+				t.Errorf("Token ID %d is not in byte fallback range [238, 493]", ids[i])
 			}
 		}
 	})
@@ -489,7 +489,7 @@ func TestBytefallbackTokens(t *testing.T) {
 		t.Logf("Emoji '😀' (UTF-8: 0xF0 0x9F 0x98 0x80) -> IDs: %v", ids)
 
 		// Should use byte fallback for all four UTF-8 bytes
-		expectedIDs := []int{236240, 236159, 236152, 236128} // bytes + 236000
+		expectedIDs := []int{478, 397, 390, 366} // bytes + 238
 		if len(ids) != len(expectedIDs) {
 			t.Errorf("Expected %d tokens, got %d", len(expectedIDs), len(ids))
 		}
@@ -515,8 +515,8 @@ func TestBytefallbackTokens(t *testing.T) {
 
 		t.Logf("Unknown char 'z' (0x7A) -> IDs: %v", ids)
 
-		// Should map to token 236000 + 0x7A = 236122
-		expectedID := 236122
+		// Should map to token 238 + 0x7A = 360
+		expectedID := 360
 		if len(ids) != 1 {
 			t.Errorf("Expected 1 token, got %d", len(ids))
 		} else if ids[0] != expectedID {
@@ -543,11 +543,11 @@ func TestBytefallbackTokens(t *testing.T) {
 			byteVal   byte
 			tokenID   int
 		}{
-			{"null", 0x00, 236000},
-			{"space", 0x20, 236032},
-			{"letter_A", 0x41, 236065},
-			{"tilde", 0x7E, 236126},
-			{"high_byte", 0xFF, 236255},
+			{"null", 0x00, 238},
+			{"space", 0x20, 270},
+			{"letter_A", 0x41, 303},
+			{"tilde", 0x7E, 364},
+			{"high_byte", 0xFF, 493},
 		}
 
 		for _, tc := range testCases {
