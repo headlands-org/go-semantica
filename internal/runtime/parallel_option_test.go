@@ -5,6 +5,8 @@ import (
 	"testing"
 )
 
+const gemmaModelPath = "../../model/embeddinggemma-300m-Q8_0.gguf"
+
 // TestDisableMatmulParallelOption verifies that the disableMatmulParallel flag
 // is correctly stored in the Model struct when passed to LoadModel.
 func TestDisableMatmulParallelOption(t *testing.T) {

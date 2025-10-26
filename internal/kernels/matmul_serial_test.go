@@ -38,7 +38,7 @@ func TestMatMulGGMLSerial(t *testing.T) {
 
 			// Compute with serial version
 			dstSerial := make([]float32, tt.batch*tt.outDim)
-			MatMulGGMLSerial(dstSerial, weight, input, tt.batch, tt.inDim, tt.outDim)
+			matMulGGMLSerial(dstSerial, weight, input, tt.batch, tt.inDim, tt.outDim)
 
 			// Compare results
 			maxDiff := float32(0)
@@ -107,11 +107,11 @@ func TestMatMulQ8_0INT8Serial(t *testing.T) {
 
 			// Compute with parallel version (via threshold)
 			dstParallel := make([]float32, tt.batch*tt.outDim)
-			MatMulQ8_0INT8(dstParallel, weightData, scales, &input, tt.batch, tt.inDim, tt.outDim, false)
+			MatMulQ8_0INT8(dstParallel, weightData, scales, &input, tt.batch, tt.inDim, tt.outDim)
 
 			// Compute with serial version
 			dstSerial := make([]float32, tt.batch*tt.outDim)
-			MatMulQ8_0INT8Serial(dstSerial, weightData, scales, &input, tt.batch, tt.inDim, tt.outDim)
+			matMulQ8_0INT8Serial(dstSerial, weightData, scales, &input, tt.batch, tt.inDim, tt.outDim, blocksPerRow, bytesPerRow)
 
 			// Compare results
 			maxDiff := float32(0)
@@ -184,7 +184,7 @@ func TestMatMulQ8_0INT8FastSerial(t *testing.T) {
 
 			// Compute with serial version
 			dstSerial := make([]float32, tt.batch*tt.outDim)
-			MatMulQ8_0INT8FastSerial(dstSerial, weight, &input, tt.batch, tt.inDim, tt.outDim)
+			matMulQ8_0INT8FastSerial(dstSerial, weight, &input, tt.batch, tt.inDim, tt.outDim)
 
 			// Compare results
 			maxDiff := float32(0)
@@ -221,7 +221,7 @@ func BenchmarkMatMulGGMLSerial(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		MatMulGGMLSerial(dst, weight, input, batch, inDim, outDim)
+		matMulGGMLSerial(dst, weight, input, batch, inDim, outDim)
 	}
 }
 
@@ -278,7 +278,7 @@ func BenchmarkMatMulQ8_0INT8FastSerial(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		MatMulQ8_0INT8FastSerial(dst, weight, &input, batch, inDim, outDim)
+		matMulQ8_0INT8FastSerial(dst, weight, &input, batch, inDim, outDim)
 	}
 }
 
@@ -298,7 +298,7 @@ func BenchmarkMatMulGGMLSerialSmall(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		MatMulGGMLSerial(dst, weight, input, batch, inDim, outDim)
+		matMulGGMLSerial(dst, weight, input, batch, inDim, outDim)
 	}
 }
 
@@ -319,7 +319,7 @@ func BenchmarkCompareSerialVsAutoSmall(b *testing.B) {
 		dst := make([]float32, batch*outDim)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			MatMulGGMLSerial(dst, weight, input, batch, inDim, outDim)
+			matMulGGMLSerial(dst, weight, input, batch, inDim, outDim)
 		}
 	})
 

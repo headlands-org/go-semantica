@@ -22,7 +22,7 @@ func main() {
 	fmt.Printf("   Model: %s\n", modelPath)
 
 	startLoad := time.Now()
-	model, err := runtime.LoadModel(modelPath)
+	model, err := runtime.LoadModel(modelPath, true) // true = disable matmul parallel (optimized for batch workloads)
 	if err != nil {
 		log.Fatalf("❌ Failed to load model: %v", err)
 	}
