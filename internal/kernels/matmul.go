@@ -185,21 +185,72 @@ func VecDotF32(a, b []float32, n int) float32 {
 }
 
 // VecAddF32 adds two vectors: dst = a + b
+// Uses SIMD acceleration when AVX2 is available
 func VecAddF32(dst, a, b []float32, n int) {
+	if n <= 0 {
+		return
+	}
+
+	// Validate slice lengths
+	if len(dst) < n || len(a) < n || len(b) < n {
+		panic("VecAddF32: slice too small")
+	}
+
+	// Use SIMD if AVX2 is available and n >= 8
+	if hasAVX2 && n >= 8 {
+		vecAddF32SIMD(&dst[0], &a[0], &b[0], n)
+		return
+	}
+
+	// Fallback to scalar
 	for i := 0; i < n; i++ {
 		dst[i] = a[i] + b[i]
 	}
 }
 
 // VecScaleF32 scales a vector: dst = a * scale
+// Uses SIMD acceleration when AVX2 is available
 func VecScaleF32(dst, a []float32, scale float32, n int) {
+	if n <= 0 {
+		return
+	}
+
+	// Validate slice lengths
+	if len(dst) < n || len(a) < n {
+		panic("VecScaleF32: slice too small")
+	}
+
+	// Use SIMD if AVX2 is available and n >= 8
+	if hasAVX2 && n >= 8 {
+		vecScaleF32SIMD(&dst[0], &a[0], scale, n)
+		return
+	}
+
+	// Fallback to scalar
 	for i := 0; i < n; i++ {
 		dst[i] = a[i] * scale
 	}
 }
 
 // VecMulF32 element-wise multiply: dst = a * b
+// Uses SIMD acceleration when AVX2 is available
 func VecMulF32(dst, a, b []float32, n int) {
+	if n <= 0 {
+		return
+	}
+
+	// Validate slice lengths
+	if len(dst) < n || len(a) < n || len(b) < n {
+		panic("VecMulF32: slice too small")
+	}
+
+	// Use SIMD if AVX2 is available and n >= 8
+	if hasAVX2 && n >= 8 {
+		vecMulF32SIMD(&dst[0], &a[0], &b[0], n)
+		return
+	}
+
+	// Fallback to scalar
 	for i := 0; i < n; i++ {
 		dst[i] = a[i] * b[i]
 	}

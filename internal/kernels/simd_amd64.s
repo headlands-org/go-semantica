@@ -223,3 +223,155 @@ done_matmul:
     VMOVSS X0, ret+32(FP)
     VZEROUPPER
     RET
+
+// func vecMulF32SIMD(dst, a, b *float32, n int)
+// Element-wise multiply: dst[i] = a[i] * b[i]
+// Processes 8 floats per iteration using AVX2
+TEXT ·vecMulF32SIMD(SB), NOSPLIT, $0-32
+    MOVQ dst+0(FP), AX      // AX = dst pointer
+    MOVQ a+8(FP), SI        // SI = a pointer
+    MOVQ b+16(FP), DI       // DI = b pointer
+    MOVQ n+24(FP), CX       // CX = n (length)
+
+    // Check if we have at least 8 elements
+    CMPQ CX, $8
+    JL tail_mul
+
+    // Process 8 floats at a time
+    MOVQ CX, BX
+    SHRQ $3, BX             // BX = n / 8
+
+loop_mul:
+    VMOVUPS (SI), Y0        // Load 8 floats from a
+    VMOVUPS (DI), Y1        // Load 8 floats from b
+    VMULPS Y0, Y1, Y2       // Multiply: Y2 = Y0 * Y1
+    VMOVUPS Y2, (AX)        // Store result
+
+    ADDQ $32, SI            // Advance a pointer (8 * 4 bytes)
+    ADDQ $32, DI            // Advance b pointer
+    ADDQ $32, AX            // Advance dst pointer
+    DECQ BX
+    JNZ loop_mul
+
+tail_mul:
+    // Handle remaining elements (< 8)
+    ANDQ $7, CX
+    JZ done_mul
+
+tail_loop_mul:
+    VMOVSS (SI), X0
+    VMOVSS (DI), X1
+    VMULSS X0, X1, X0
+    VMOVSS X0, (AX)
+
+    ADDQ $4, SI
+    ADDQ $4, DI
+    ADDQ $4, AX
+    DECQ CX
+    JNZ tail_loop_mul
+
+done_mul:
+    VZEROUPPER
+    RET
+
+// func vecAddF32SIMD(dst, a, b *float32, n int)
+// Element-wise add: dst[i] = a[i] + b[i]
+// Processes 8 floats per iteration using AVX2
+TEXT ·vecAddF32SIMD(SB), NOSPLIT, $0-32
+    MOVQ dst+0(FP), AX      // AX = dst pointer
+    MOVQ a+8(FP), SI        // SI = a pointer
+    MOVQ b+16(FP), DI       // DI = b pointer
+    MOVQ n+24(FP), CX       // CX = n (length)
+
+    // Check if we have at least 8 elements
+    CMPQ CX, $8
+    JL tail_add
+
+    // Process 8 floats at a time
+    MOVQ CX, BX
+    SHRQ $3, BX             // BX = n / 8
+
+loop_add:
+    VMOVUPS (SI), Y0        // Load 8 floats from a
+    VMOVUPS (DI), Y1        // Load 8 floats from b
+    VADDPS Y0, Y1, Y2       // Add: Y2 = Y0 + Y1
+    VMOVUPS Y2, (AX)        // Store result
+
+    ADDQ $32, SI            // Advance a pointer (8 * 4 bytes)
+    ADDQ $32, DI            // Advance b pointer
+    ADDQ $32, AX            // Advance dst pointer
+    DECQ BX
+    JNZ loop_add
+
+tail_add:
+    // Handle remaining elements (< 8)
+    ANDQ $7, CX
+    JZ done_add
+
+tail_loop_add:
+    VMOVSS (SI), X0
+    VMOVSS (DI), X1
+    VADDSS X0, X1, X0
+    VMOVSS X0, (AX)
+
+    ADDQ $4, SI
+    ADDQ $4, DI
+    ADDQ $4, AX
+    DECQ CX
+    JNZ tail_loop_add
+
+done_add:
+    VZEROUPPER
+    RET
+
+// func vecScaleF32SIMD(dst, a *float32, scale float32, n int)
+// Scale vector: dst[i] = a[i] * scale
+// Processes 8 floats per iteration using AVX2
+TEXT ·vecScaleF32SIMD(SB), NOSPLIT, $0-32
+    MOVQ dst+0(FP), AX      // AX = dst pointer
+    MOVQ a+8(FP), SI        // SI = a pointer
+    VMOVSS scale+16(FP), X0 // X0 = scale (scalar)
+    MOVQ n+24(FP), CX       // CX = n (length)
+
+    // Broadcast scale to all 8 lanes of Y1
+    VBROADCASTSS X0, Y1
+
+    // Check if we have at least 8 elements
+    CMPQ CX, $8
+    JL tail_scale
+
+    // Process 8 floats at a time
+    MOVQ CX, BX
+    SHRQ $3, BX             // BX = n / 8
+
+loop_scale:
+    VMOVUPS (SI), Y0        // Load 8 floats from a
+    VMULPS Y0, Y1, Y2       // Multiply: Y2 = Y0 * Y1 (scale)
+    VMOVUPS Y2, (AX)        // Store result
+
+    ADDQ $32, SI            // Advance a pointer (8 * 4 bytes)
+    ADDQ $32, AX            // Advance dst pointer
+    DECQ BX
+    JNZ loop_scale
+
+tail_scale:
+    // Handle remaining elements (< 8)
+    ANDQ $7, CX
+    JZ done_scale
+
+    // Use scalar version of scale (in X1)
+    VMOVSS scale+16(FP), X1
+
+tail_loop_scale:
+    VMOVSS (SI), X0
+    VMULSS X0, X1, X0
+    VMOVSS X0, (AX)
+
+    ADDQ $4, SI
+    ADDQ $4, AX
+    DECQ CX
+    JNZ tail_loop_scale
+
+done_scale:
+    VZEROUPPER
+    RET

@@ -92,3 +92,24 @@ func dotProductINT8SIMD(a, b []int8, n int) int32 {
 	}
 	return sum
 }
+
+// vecMulF32SIMD is the assembly implementation for element-wise multiplication
+// dst[i] = a[i] * b[i]
+// Processes 8 float32 values per iteration using AVX2
+//
+//go:noescape
+func vecMulF32SIMD(dst, a, b *float32, n int)
+
+// vecAddF32SIMD is the assembly implementation for element-wise addition
+// dst[i] = a[i] + b[i]
+// Processes 8 float32 values per iteration using AVX2
+//
+//go:noescape
+func vecAddF32SIMD(dst, a, b *float32, n int)
+
+// vecScaleF32SIMD is the assembly implementation for vector scaling
+// dst[i] = a[i] * scale
+// Processes 8 float32 values per iteration using AVX2
+//
+//go:noescape
+func vecScaleF32SIMD(dst, a *float32, scale float32, n int)

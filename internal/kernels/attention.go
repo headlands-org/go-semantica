@@ -83,11 +83,8 @@ func MultiHeadAttentionWithScale(
 				for j := 0; j < seqLen; j++ {
 					kOffset := ((b*seqLen+j)*nHeads + h) * headDim
 
-					// Dot product
-					score := float32(0)
-					for d := 0; d < headDim; d++ {
-						score += Q[qOffset+d] * K[kOffset+d]
-					}
+					// SIMD-accelerated dot product
+					score := dotProductSIMD(Q[qOffset:qOffset+headDim], K[kOffset:kOffset+headDim], headDim)
 					score *= scale
 
 					// Apply mask if provided

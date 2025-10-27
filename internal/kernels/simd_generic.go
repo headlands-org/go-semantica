@@ -36,3 +36,41 @@ func dotProductINT8SIMD(a, b []int8, n int) int32 {
 	}
 	return sum
 }
+
+// vecMulF32SIMD is the scalar fallback for element-wise multiplication
+// dst[i] = a[i] * b[i]
+func vecMulF32SIMD(dst, a, b *float32, n int) {
+	// Convert pointers to slices for bounds checking
+	dstSlice := (*[1 << 30]float32)(dst)[:n:n]
+	aSlice := (*[1 << 30]float32)(a)[:n:n]
+	bSlice := (*[1 << 30]float32)(b)[:n:n]
+
+	for i := 0; i < n; i++ {
+		dstSlice[i] = aSlice[i] * bSlice[i]
+	}
+}
+
+// vecAddF32SIMD is the scalar fallback for element-wise addition
+// dst[i] = a[i] + b[i]
+func vecAddF32SIMD(dst, a, b *float32, n int) {
+	// Convert pointers to slices for bounds checking
+	dstSlice := (*[1 << 30]float32)(dst)[:n:n]
+	aSlice := (*[1 << 30]float32)(a)[:n:n]
+	bSlice := (*[1 << 30]float32)(b)[:n:n]
+
+	for i := 0; i < n; i++ {
+		dstSlice[i] = aSlice[i] + bSlice[i]
+	}
+}
+
+// vecScaleF32SIMD is the scalar fallback for vector scaling
+// dst[i] = a[i] * scale
+func vecScaleF32SIMD(dst, a *float32, scale float32, n int) {
+	// Convert pointers to slices for bounds checking
+	dstSlice := (*[1 << 30]float32)(dst)[:n:n]
+	aSlice := (*[1 << 30]float32)(a)[:n:n]
+
+	for i := 0; i < n; i++ {
+		dstSlice[i] = aSlice[i] * scale
+	}
+}

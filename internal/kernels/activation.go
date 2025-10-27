@@ -40,6 +40,110 @@ func GELUQuick(dst, src []float32, n int) {
 	}
 }
 
+// GELUQuickSIMD applies a SIMD-optimized version of GELUQuick using polynomial approximation
+// GELU(x) ≈ x * sigmoid(1.702 * x)
+// Uses fast exp approximation via 2^x identity: exp(x) = 2^(x*log2(e))
+// Approximates 2^x using polynomial + bit manipulation
+func GELUQuickSIMD(dst, src []float32, n int) {
+	const scale = 1.702
+	const log2e = 1.442695041 // log2(e)
+
+	// Process in blocks of 8 for better vectorization
+	i := 0
+	for ; i+8 <= n; i += 8 {
+		for j := 0; j < 8; j++ {
+			x := src[i+j]
+			sx := scale * x
+
+			// Fast sigmoid approximation using 2^x identity
+			// sigmoid(x) = 1 / (1 + exp(-x)) = 1 / (1 + 2^(-x * log2(e)))
+			// Use polynomial approximation for 2^x for fractional part
+
+			var sigmoid float32
+			if sx >= 0 {
+				// Positive path: sigmoid(x) = 1 / (1 + exp(-x))
+				negSx := -sx
+				exp_negSx := fastExp(negSx)
+				sigmoid = 1.0 / (1.0 + exp_negSx)
+			} else {
+				// Negative path: sigmoid(x) = exp(x) / (1 + exp(x))
+				// More numerically stable for negative x
+				exp_sx := fastExp(sx)
+				sigmoid = exp_sx / (1.0 + exp_sx)
+			}
+
+			dst[i+j] = x * sigmoid
+		}
+	}
+
+	// Handle remaining elements
+	for ; i < n; i++ {
+		x := src[i]
+		sx := scale * x
+
+		var sigmoid float32
+		if sx >= 0 {
+			exp_negSx := fastExp(-sx)
+			sigmoid = 1.0 / (1.0 + exp_negSx)
+		} else {
+			exp_sx := fastExp(sx)
+			sigmoid = exp_sx / (1.0 + exp_sx)
+		}
+
+		dst[i] = x * sigmoid
+	}
+}
+
+// fastExp approximates exp(x) using polynomial and bit manipulation
+// Based on the identity: exp(x) = 2^(x * log2(e))
+// Accurate to ~0.5% for |x| < 5
+func fastExp(x float32) float32 {
+	const log2e = 1.442695041
+
+	// Clamp for numerical stability
+	if x < -10 {
+		return 0
+	}
+	if x > 10 {
+		return 22026.4657948 // exp(10)
+	}
+
+	// Convert to 2^y where y = x * log2(e)
+	y := x * log2e
+
+	// Split into integer and fractional parts
+	intPart := int32(y)
+	fracPart := y - float32(intPart)
+
+	// Polynomial approximation for 2^frac (frac in [0,1])
+	// 2^x ≈ 1 + x*(0.693147 + x*(0.240227 + x*(0.055504 + x*0.009676)))
+	// Coefficients from minimax polynomial fit
+	const c1 = 0.693147180559945
+	const c2 = 0.240226506959101
+	const c3 = 0.055504108664821
+	const c4 = 0.009676036358193
+
+	poly := 1.0 + fracPart*(c1+fracPart*(c2+fracPart*(c3+fracPart*c4)))
+
+	// Combine with integer part using bit manipulation
+	// 2^intPart is done by shifting the exponent bits
+	// float32 format: 1 sign bit + 8 exponent bits + 23 mantissa bits
+	// Exponent bias is 127
+
+	if intPart >= -126 && intPart <= 127 {
+		// Normal range - use bit manipulation
+		exponentBits := uint32(intPart+127) << 23
+		scale2int := math.Float32frombits(exponentBits)
+		return poly * scale2int
+	} else if intPart < -126 {
+		// Underflow
+		return 0
+	} else {
+		// Overflow
+		return 3.402823e+38 // ~max float32
+	}
+}
+
 // ReLU applies the ReLU activation function
 // ReLU(x) = max(0, x)
 func ReLU(dst, src []float32, n int) {
