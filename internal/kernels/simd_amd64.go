@@ -24,6 +24,12 @@ func dotProductAVX2Asm(a, b *float32, n int) float32
 //go:noescape
 func dotProductINT8VNNI(a, b *int8, n int) int32
 
+// matmulInnerLoopAsm processes one output element with fully-optimized vectorized FMA
+// This is the performance-critical loop that keeps all accumulators in YMM registers
+//
+//go:noescape
+func matmulInnerLoopAsm(inputRow *int8, weightData *byte, scales *float32, numBlocks int) float32
+
 // dotProductINT8Asm is the direct assembly call without dispatcher overhead
 // IMPORTANT: Caller must ensure slices are valid and n >= 16 for SIMD
 func dotProductINT8Asm(a, b *int8, n int) int32 {

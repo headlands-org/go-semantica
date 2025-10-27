@@ -145,3 +145,81 @@ done_int8:
     VMOVD   X0, ret+24(FP)
     VZEROUPPER
     RET
+
+// func matmulInnerLoopAsm(inputRow *int8, weightData *byte, scales *float32, numBlocks int) float32
+// Fully-optimized inner loop with vectorized FMA accumulation
+// Processes all blocks for one output element, keeping accumulators in YMM registers
+TEXT ·matmulInnerLoopAsm(SB), NOSPLIT, $0-36
+    MOVQ    inputRow+0(FP), SI      // SI = input pointer
+    MOVQ    weightData+8(FP), DI    // DI = weight data pointer
+    MOVQ    scales+16(FP), R8       // R8 = scales pointer
+    MOVQ    numBlocks+24(FP), CX    // CX = number of blocks
+
+    // Initialize float32 accumulator to zero
+    VXORPS  Y0, Y0, Y0              // Y0 = 8 × float32 accumulator
+
+    // Process each block
+    XORQ    BX, BX                  // BX = block index
+
+block_loop:
+    CMPQ    BX, CX
+    JGE     done_matmul
+
+    // Load scale for this block and broadcast to all 8 lanes
+    MOVQ    BX, R9
+    SHLQ    $2, R9                  // R9 = blockIdx * 4
+    VBROADCASTSS (R8)(R9*1), Y1     // Y1 = scale (broadcast to 8 floats)
+
+    // Calculate input pointer: inputRow + blockIdx * 32
+    MOVQ    BX, R10
+    SHLQ    $5, R10                 // R10 = blockIdx * 32
+    LEAQ    (SI)(R10*1), R11        // R11 = input ptr for this block
+
+    // Calculate weight pointer: weightData + blockIdx * 34 + 2
+    MOVQ    BX, R12
+    IMULQ   $34, R12                // R12 = blockIdx * 34
+    LEAQ    2(DI)(R12*1), R13       // R13 = weight ptr (skip f16 scale)
+
+    // Load 32 int8 values from input and weight
+    VMOVDQU (R11), Y2               // Y2 = 32 × int8 from input
+    VMOVDQU (R13), Y3               // Y3 = 32 × int8 from weight
+
+    // Sign-extend int8 to int16 (process 16 at a time)
+    // Lower 16 bytes
+    VPMOVSXBW X2, Y4                // Y4 = lower 16 int8 → int16
+    VPMOVSXBW X3, Y5                // Y5 = lower 16 int8 → int16
+
+    // Multiply int16 pairs and add adjacent → 8 int32
+    VPMADDWD Y4, Y5, Y6             // Y6 = 8 × int32 sums (lower half)
+
+    // Upper 16 bytes
+    VEXTRACTI128 $1, Y2, X7         // X7 = upper 16 bytes of input
+    VEXTRACTI128 $1, Y3, X8         // X8 = upper 16 bytes of weight
+    VPMOVSXBW X7, Y7                // Y7 = upper 16 int8 → int16
+    VPMOVSXBW X8, Y8                // Y8 = upper 16 int8 → int16
+    VPMADDWD Y7, Y8, Y9             // Y9 = 8 × int32 sums (upper half)
+
+    // Add lower and upper halves
+    VPADDD Y6, Y9, Y10              // Y10 = total 8 × int32 sums
+
+    // Convert int32 to float32
+    VCVTDQ2PS Y10, Y11              // Y11 = 8 × float32
+
+    // Vectorized FMA: acc += dotProduct * scale
+    VFMADD231PS Y11, Y1, Y0         // Y0 = Y0 + (Y11 * Y1)
+
+    // Next block
+    INCQ    BX
+    JMP     block_loop
+
+done_matmul:
+    // Horizontal sum of Y0 (8 float32 values)
+    VEXTRACTF128 $1, Y0, X1         // X1 = upper 4 floats
+    VADDPS X0, X1, X0               // X0 = lower + upper
+    VHADDPS X0, X0, X0              // Horizontal add
+    VHADDPS X0, X0, X0              // Horizontal add again
+
+    // Return result
+    VMOVSS X0, ret+32(FP)
+    VZEROUPPER
+    RET

@@ -304,27 +304,18 @@ func matMulQ8_0INT8Serial(dst []float32, weightData []byte, scales []float32, in
 		inputOffset := i * inDim
 
 		for j := 0; j < outDim; j++ {
-			sum := float32(0)
-
 			// Weight row j starts at offset j * bytesPerRow
 			weightRowOffset := j * bytesPerRow
 			scaleBaseIdx := j * blocksPerRow
 
-			// Process full blocks of 32 (fast path)
-			// OPTIMIZATION: Hoist inputScale multiplication outside block loop
-			for blockIdx := 0; blockIdx < fullBlocks; blockIdx++ {
-				blockOffset := weightRowOffset + blockIdx*34
-				scale := scales[scaleBaseIdx+blockIdx]
-				qsOffset := blockOffset + 2
-				blockStart := blockIdx * 32
-
-				// Direct assembly call - bypass dispatcher overhead
-				inputPtr := (*int8)(unsafe.Pointer(&input.Data[inputOffset+blockStart]))
-				weightPtr := (*int8)(unsafe.Pointer(&weightData[qsOffset]))
-				blockSum := dotProductINT8Asm(inputPtr, weightPtr, 32)
-
-				// Accumulate without inputScale (apply once at end)
-				sum += float32(blockSum) * scale
+			// Use fully-optimized assembly inner loop for full blocks
+			// This keeps all accumulators in YMM registers with vectorized FMA
+			sum := float32(0)
+			if fullBlocks > 0 {
+				inputPtr := (*int8)(unsafe.Pointer(&input.Data[inputOffset]))
+				weightPtr := (*byte)(unsafe.Pointer(&weightData[weightRowOffset]))
+				scalesPtr := (*float32)(unsafe.Pointer(&scales[scaleBaseIdx]))
+				sum = matmulInnerLoopAsm(inputPtr, weightPtr, scalesPtr, fullBlocks)
 			}
 
 			// Handle partial block if needed
@@ -343,7 +334,7 @@ func matMulQ8_0INT8Serial(dst []float32, weightData []byte, scales []float32, in
 				sum += float32(blockSum) * scale
 			}
 
-			// Apply inputScale once at the end instead of per-block
+			// Apply inputScale once at the end
 			dst[i*outDim+j] = sum * inputScale
 		}
 	}
