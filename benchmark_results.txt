@@ -1,0 +1,22 @@
+=== Pure-Go-Llamas Performance Benchmark ===
+Model: EmbeddingGemma-300M Q8_0
+Date: Mon Oct 27 01:55:18 PM MDT 2025
+CPU: AMD Ryzen 9 7900 12-Core Processor
+
+=== Test 1: Similarity Example (3 texts) ===
+Generated 3 embeddings in 146.477129ms (avg: 48.825709ms per embedding)
+Similarity scores:
+Most similar pair: [0] and [1] (similarity: 0.8558)
+
+=== Test 2: Batch Processing (100 texts) ===
+Batch embedding completed:
+  Average time per sentence: 5.822233ms
+  Throughput: 171.76 sentences/second
+
+=== Test 3: Correctness Validation ===
+        Cosine similarity: 0.988247
+    embeddinggemma_comparison_test.go:104:   Max difference:  0.045459 at index 512
+    embeddinggemma_comparison_test.go:108:   RMS difference:  0.005532
+        ⚠️  Cosine similarity 0.988247 is acceptable but not perfect
+
+=== Benchmark Complete ===

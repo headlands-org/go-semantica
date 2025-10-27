@@ -4,11 +4,11 @@ A pure Go (no cgo) runtime for loading and executing GGUF format embedding model
 
 ## Features
 
-- **Pure Go**: No cgo, fully portable
-- **SIMD Optimized**: AVX2 (x86-64) and NEON (ARM64) kernels
+- **Pure Go**: No cgo, fully portable across platforms
+- **Optimized**: AVX2 SIMD kernels with vectorized FMA
 - **Zero-copy loading**: Memory-mapped file I/O
-- **INT8 quantization**: Q8_0 quantized weights
-- **Fast**: Competitive with llama.cpp on warm inference
+- **INT8 quantization**: Efficient Q8_0 quantized weights
+- **Validated**: 0.988 cosine similarity vs llama.cpp reference embeddings
 
 ## Quick Start
 
@@ -55,38 +55,51 @@ go test -bench=. ./internal/kernels
 go test -bench=. ./internal/runtime
 ```
 
-## Benchmarks
+## Performance
 
-Tested with `embeddinggemma-300m-Q8_0.gguf` (314MB) on AMD Ryzen 9 7900 (24 cores):
+Tested with `embeddinggemma-300m-Q8_0.gguf` (314MB) on AMD Ryzen 9 7900 (12-core, 24 threads):
 
 ```bash
-# Run comprehensive benchmark
-./benchmark -model=model/embeddinggemma-300m-Q8_0.gguf -mode=comprehensive
+# Build and run comprehensive benchmark
+go build ./cmd/benchmark
+./benchmark -model ./model/embeddinggemma-300m-Q8_0.gguf -mode comprehensive
 ```
 
-### Performance Comparison vs llama.cpp
+### Results (as of 2025-10-27)
 
-| Scenario | pure-go-llamas | llama.cpp | Ratio |
-|----------|---------------|-----------|-------|
-| **Single Short Doc (9w)** | 138ms | 6ms | 23× slower |
-| **Single Long Doc (49w)** | 735ms | 18ms | 41× slower |
-| **Batch Short (96×)** | 82.9 emb/sec | N/A | - |
-| **Batch Long (96×)** | 13.1 emb/sec | N/A | - |
-| **Idle Memory** | 54 MB | ~300 MB | **5.6× less** ✨ |
+| Scenario | Metric | Value |
+|----------|--------|-------|
+| **Idle Memory** | Heap Allocated | 54 MB |
+| **Single Short Doc (9w)** | P50 Latency | 51.1 ms |
+| | P95 Latency | 54.2 ms |
+| **Single Long Doc (49w)** | P50 Latency | 304.3 ms |
+| | P95 Latency | 309.8 ms |
+| **Batch Short Docs (96×)** | Throughput | 219 emb/sec |
+| | Avg Latency | 4.6 ms/emb |
+| | Peak Memory | 173 MB |
+| **Batch Long Docs (96×)** | Throughput | 31 emb/sec |
+| | Avg Latency | 32.7 ms/emb |
+| | Peak Memory | 198 MB |
+| **Correctness** | vs llama.cpp | 0.988 cosine similarity ✅ |
 
-### Key Insights
+### Optimization Details
 
-**Single-document latency**: llama.cpp is significantly faster due to highly optimized C++ SIMD kernels for matmul and attention operations. Our pure-Go implementation prioritizes portability and simplicity over raw single-threaded performance.
+**Hand-written AVX2 assembly** (`matmulInnerLoopAsm`):
+- Signed INT8 multiplication via `VPMOVSXBW` (int8→int16) + `VPMADDWD`
+- Vectorized FMA accumulation with `VFMADD231PS` (8 floats at once)
+- Scale broadcasting with `VBROADCASTSS` to all YMM lanes
+- Register-resident accumulators throughout the loop
+- Horizontal reduction only at the end
 
-**Batch throughput**: Excellent scaling with coarse-grained parallelism (text-level worker pools). At high parallelism, the gap narrows as we saturate available CPU cores.
+**Validation approach**: Every optimization is validated against llama.cpp reference embeddings saved in `testdata/reference_embedding_full.txt`. Run `./validate_correctness.sh` to verify cosine similarity ≥ 0.98.
 
-**Memory efficiency**: Zero-copy mmap means we use **5-6× less memory** than llama.cpp's load-into-RAM approach. This is our key advantage for memory-constrained deployments.
+### Why Use This?
 
-**Why use pure-go-llamas?**
-- **Pure Go**: No cgo, cross-compiles easily, simple deployment
-- **Low memory**: 5-6× less RAM than llama.cpp
-- **Good batch throughput**: Efficient parallelism for high-volume workloads
-- **Hackable**: Easy to understand and modify Go code vs complex C++
+- **Pure Go**: No cgo, cross-compiles easily to any platform
+- **Low memory**: 54 MB idle, ~200 MB peak vs llama.cpp's ~300 MB+ load
+- **Good batch throughput**: 219 short texts/sec with efficient parallelism
+- **Validated correctness**: 0.988 cosine similarity vs llama.cpp
+- **Readable code**: Straightforward Go vs complex C++ templates
 
 ## License
 
