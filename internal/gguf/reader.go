@@ -8,11 +8,13 @@ import (
 	mmap "github.com/edsrzf/mmap-go"
 )
 
-// Reader provides read access to a GGUF file via memory mapping
+// Reader provides read access to a GGUF file via memory mapping or RAM loading
 type Reader struct {
 	path     string
 	file     *os.File
-	mmap     mmap.MMap // []byte view of the memory-mapped file
+	mmap     mmap.MMap // []byte view of the memory-mapped file (nil if useMmap=false)
+	data     []byte    // in-memory copy of file data (nil if useMmap=true)
+	useMmap  bool      // if false, load into RAM instead of mmap
 	header   Header
 	metadata map[string]Metadata
 	tensors  map[string]*TensorDesc
@@ -30,25 +32,48 @@ type TensorDesc struct {
 
 // Open opens a GGUF file and memory-maps it
 func Open(path string) (*Reader, error) {
+	return OpenWithOptions(path, true)
+}
+
+// OpenWithOptions opens a GGUF file with specified options
+// If useMmap is false, loads entire file into RAM instead of memory-mapping
+func OpenWithOptions(path string, useMmap bool) (*Reader, error) {
 	// Open file for reading
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open file: %w", err)
 	}
 
-	// Memory-map the file (this gives us a []byte view with zero-copy)
-	mmapData, err := mmap.Map(file, mmap.RDONLY, 0)
-	if err != nil {
-		file.Close()
-		return nil, fmt.Errorf("mmap file: %w", err)
-	}
-
 	r := &Reader{
 		path:     path,
 		file:     file,
-		mmap:     mmapData,
+		useMmap:  useMmap,
 		metadata: make(map[string]Metadata),
 		tensors:  make(map[string]*TensorDesc),
+	}
+
+	if useMmap {
+		// Memory-map the file (zero-copy)
+		mmapData, err := mmap.Map(file, mmap.RDONLY, 0)
+		if err != nil {
+			file.Close()
+			return nil, fmt.Errorf("mmap file: %w", err)
+		}
+		r.mmap = mmapData
+	} else {
+		// Load entire file into RAM
+		fileInfo, err := file.Stat()
+		if err != nil {
+			file.Close()
+			return nil, fmt.Errorf("stat file: %w", err)
+		}
+
+		r.data = make([]byte, fileInfo.Size())
+		_, err = file.ReadAt(r.data, 0)
+		if err != nil {
+			file.Close()
+			return nil, fmt.Errorf("read file: %w", err)
+		}
 	}
 
 	// Parse header and metadata
@@ -78,9 +103,13 @@ func (r *Reader) Close() error {
 
 // parse reads the GGUF header, metadata, and tensor info
 func (r *Reader) parse() error {
-	// The mmap []byte gives us direct access to the file
-	// We parse metadata from it without copying
-	data := r.mmap
+	// Get data view (either mmap or RAM)
+	var data []byte
+	if r.useMmap {
+		data = r.mmap
+	} else {
+		data = r.data
+	}
 	offset := 0
 
 	// Read header
@@ -311,7 +340,7 @@ func (r *Reader) ListTensors() []string {
 }
 
 // GetTensorData returns a view of the tensor data as a byte slice
-// The returned slice is a direct view into the memory-mapped file (zero-copy)
+// The returned slice is a direct view into the memory-mapped file or RAM buffer (zero-copy)
 func (r *Reader) GetTensorData(name string) ([]byte, error) {
 	desc, ok := r.tensors[name]
 	if !ok {
@@ -320,13 +349,24 @@ func (r *Reader) GetTensorData(name string) ([]byte, error) {
 
 	offset := r.dataOff + desc.Offset
 	end := offset + desc.Size
-	if offset < 0 || end > int64(len(r.mmap)) {
-		return nil, fmt.Errorf("tensor data out of bounds: %s (offset=%d size=%d fileSize=%d)",
-			name, offset, desc.Size, len(r.mmap))
+
+	var dataLen int
+	if r.useMmap {
+		dataLen = len(r.mmap)
+	} else {
+		dataLen = len(r.data)
 	}
 
-	// Return a zero-copy slice view directly into the mmap
-	return r.mmap[offset:end], nil
+	if offset < 0 || end > int64(dataLen) {
+		return nil, fmt.Errorf("tensor data out of bounds: %s (offset=%d size=%d fileSize=%d)",
+			name, offset, desc.Size, dataLen)
+	}
+
+	// Return a zero-copy slice view (from mmap or RAM buffer)
+	if r.useMmap {
+		return r.mmap[offset:end], nil
+	}
+	return r.data[offset:end], nil
 }
 
 // Header returns the GGUF header

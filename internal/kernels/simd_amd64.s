@@ -145,3 +145,90 @@ done_int8:
     VMOVD   X0, ret+24(FP)
     VZEROUPPER
     RET
+
+// func dotProductINT8Asm(a, b *int8, n int) int32
+// Optimized AVX2 implementation using VPMADDUBSW (processes 32 bytes/iteration)
+// Based on llama.cpp's mul_sum_i8_pairs_float approach
+TEXT ·dotProductINT8Asm(SB), NOSPLIT, $0-28
+    MOVQ    a+0(FP), SI          // SI = a pointer
+    MOVQ    b+8(FP), DI          // DI = b pointer
+    MOVQ    n+16(FP), CX         // CX = n (length)
+
+    // Initialize int32 accumulator to zero
+    VPXOR   Y0, Y0, Y0           // Y0 = 8 × int32 zeros
+
+    // Check if we have at least 32 elements
+    CMPQ    CX, $32
+    JL      tail_new
+
+    // Process 32 int8s at a time (full YMM registers)
+    MOVQ    CX, BX
+    SHRQ    $5, BX               // BX = len / 32
+
+loop_new:
+    // Load 32 int8 values from a and b
+    VMOVDQU     (SI), Y1         // Y1 = 32 × int8 from a
+    VMOVDQU     (DI), Y2         // Y2 = 32 × int8 from b
+
+    // Compute abs(a) and sign-adjust b using sign trick
+    // This allows us to use VPMADDUBSW (unsigned × signed)
+    VPSIGNB     Y1, Y1, Y3       // Y3 = abs(a) = sign(a) * a
+    VPSIGNB     Y2, Y1, Y4       // Y4 = b * sign(a)
+
+    // Multiply unsigned×signed bytes, add adjacent pairs → 16×int16
+    // For each pair: result[i] = Y3[2*i] * Y4[2*i] + Y3[2*i+1] * Y4[2*i+1]
+    VPMADDUBSW  Y3, Y4, Y5       // Y5 = 16 × int16 products
+
+    // Multiply int16 by 1 and add adjacent pairs → 8×int32
+    // We need a vector of all 1s for VPMADDWD
+    VPCMPEQW    Y6, Y6, Y6       // Y6 = all bits set (0xFFFF...)
+    VPSRLW      $15, Y6, Y6      // Y6 = all 1s (shift right 15 bits)
+    VPMADDWD    Y5, Y6, Y7       // Y7 = 8 × int32 sums
+
+    // Accumulate
+    VPADDD      Y0, Y7, Y0       // Y0 += Y7
+
+    ADDQ    $32, SI              // Advance pointers
+    ADDQ    $32, DI
+    DECQ    BX
+    JNZ     loop_new
+
+    // Horizontal sum of Y0 (8 × int32) into one int32
+    // Extract upper and lower 128-bit halves
+    VEXTRACTI128    $1, Y0, X1   // X1 = upper 4 int32s
+    VPADDD          X0, X1, X0   // X0 = lower 4 + upper 4
+
+    // Horizontal sum within X0
+    VPSHUFD     $0xEE, X0, X1    // X1 = [d3, d2, d3, d2]
+    VPADDD      X0, X1, X0       // X0 = [d3+d3, d2+d2, d1+d3, d0+d2]
+    VPSHUFD     $0x55, X0, X1    // X1 = [d2+d2, d1+d3, d2+d2, d1+d3]
+    VPADDD      X0, X1, X0       // X0 = sum in lowest lane
+
+tail_new:
+    // Handle remaining elements (< 32)
+    ANDQ    $31, CX
+    JZ      done_new
+
+    // Extract accumulated sum to scalar register
+    VMOVD   X0, AX               // EAX = accumulated sum
+
+tail_loop_new:
+    // Scalar accumulation for remaining elements
+    MOVBQSX (SI), R8             // Sign-extend int8 to int64
+    MOVBQSX (DI), R9
+    IMULQ   R9, R8               // R8 = a * b
+    ADDQ    R8, AX               // AX += R8
+
+    INCQ    SI
+    INCQ    DI
+    DECQ    CX
+    JNZ     tail_loop_new
+
+    MOVL    AX, ret+24(FP)
+    VZEROUPPER
+    RET
+
+done_new:
+    VMOVD   X0, ret+24(FP)
+    VZEROUPPER
+    RET

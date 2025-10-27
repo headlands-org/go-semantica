@@ -128,7 +128,11 @@ type Layer struct {
 
 // LoadModel loads a GGUF model from file
 func LoadModel(path string) (*Model, error) {
-	reader, err := gguf.Open(path)
+	return LoadModelWithOptions(path, true)
+}
+
+func LoadModelWithOptions(path string, useMmap bool) (*Model, error) {
+	reader, err := gguf.OpenWithOptions(path, useMmap)
 	if err != nil {
 		return nil, fmt.Errorf("open gguf: %w", err)
 	}
