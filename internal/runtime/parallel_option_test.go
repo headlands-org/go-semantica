@@ -1,3 +1,5 @@
+// +build integration
+
 package runtime
 
 import (
@@ -5,7 +7,7 @@ import (
 	"testing"
 )
 
-const gemmaModelPath = "../../model/embeddinggemma-300m-Q8_0.gguf"
+// Note: gemmaModelPath is defined in embeddinggemma_test.go
 
 // TestDisableMatmulParallelOption verifies that the disableMatmulParallel flag
 // is correctly stored in the Model struct when passed to LoadModel.

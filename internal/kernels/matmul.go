@@ -4,10 +4,9 @@ package kernels
 import (
 	"fmt"
 	"math"
-	"sync"
 )
 
-// MatMulGGML performs matrix multiplication with ggml semantics (parallel version)
+// MatMulGGML performs matrix multiplication with ggml semantics
 // Matches ggml_mul_mat(weight, input) behavior
 // weight: [out_dim, in_dim], input: [batch, in_dim], output: [batch, out_dim]
 // This is equivalent to: output = input @ weight.T
@@ -17,13 +16,8 @@ func MatMulGGML(dst, weight, input []float32, batch, inDim, outDim int) {
 		dst[i] = 0
 	}
 
-	// Use parallel execution for large matrices
-	const parallelThreshold = 256
-	if outDim >= parallelThreshold {
-		matMulGGMLParallel(dst, weight, input, batch, inDim, outDim)
-	} else {
-		matMulGGMLSerial(dst, weight, input, batch, inDim, outDim)
-	}
+	// Always use serial execution (simple, cache-friendly)
+	matMulGGMLSerial(dst, weight, input, batch, inDim, outDim)
 }
 
 // matMulGGMLSerial is the serial implementation with cache-aware blocking
@@ -72,62 +66,6 @@ func matMulGGMLSerial(dst, weight, input []float32, batch, inDim, outDim int) {
 			}
 		}
 	}
-}
-
-// matMulGGMLParallel is the parallel implementation with more workers
-func matMulGGMLParallel(dst, weight, input []float32, batch, inDim, outDim int) {
-	const numWorkers = 16 // Balanced for 24-core CPU (sweet spot)
-	const blockSize = 16  // Smaller for better L1 cache utilization
-
-	chunkSize := (outDim + numWorkers - 1) / numWorkers
-	var wg sync.WaitGroup
-	wg.Add(numWorkers)
-
-	for w := 0; w < numWorkers; w++ {
-		j0Start := w * chunkSize
-		j0End := min(j0Start+chunkSize, outDim)
-
-		go func(j0Start, j0End int) {
-			defer wg.Done()
-
-			// Early exit if this worker has no work
-			if j0Start >= outDim {
-				return
-			}
-
-			for i0 := 0; i0 < batch; i0 += blockSize {
-				i1 := min(i0+blockSize, batch)
-				for j0 := j0Start; j0 < j0End; j0 += blockSize {
-					j1 := min(j0+blockSize, j0End)
-					for k0 := 0; k0 < inDim; k0 += blockSize {
-						k1 := min(k0+blockSize, inDim)
-
-						// Inner loops with SIMD acceleration
-						for i := i0; i < i1; i++ {
-							inputBase := i * inDim
-							dstBase := i * outDim
-
-							for j := j0; j < j1; j++ {
-								weightBase := j * inDim
-								blockLen := k1 - k0
-
-								// Use SIMD dot product for the block
-								sum := dotProductSIMD(
-									input[inputBase+k0:inputBase+k1],
-									weight[weightBase+k0:weightBase+k1],
-									blockLen,
-								)
-
-								dst[dstBase+j] += sum
-							}
-						}
-					}
-				}
-			}
-		}(j0Start, j0End)
-	}
-
-	wg.Wait()
 }
 
 // MatMulF32 performs matrix multiplication: C = A * B

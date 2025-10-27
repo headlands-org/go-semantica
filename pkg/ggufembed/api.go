@@ -161,62 +161,53 @@ func (r *embedRuntime) Embed(ctx context.Context, texts []string) ([][]float32, 
 	results := make([][]float32, len(texts))
 	errors := make([]error, len(texts))
 
-	// Auto-tune worker count based on batch size if not explicitly set
-	// NOTE: Model is not thread-safe, so we use a semaphore to ensure only one
-	// goroutine accesses the model at a time. The worker pool pattern here is
-	// designed for future expansion when we have per-worker model instances.
-	numWorkers := r.options.NumThreads
-	if numWorkers <= 0 {
-		numWorkers = r.autoTuneWorkers(len(texts))
+	// Simple worker selection: use all available cores
+	workers := runtime.NumCPU()
+	if len(texts) < workers {
+		workers = len(texts)
 	}
 
-	// Use a semaphore to limit concurrent model access to 1
-	// TODO: Create per-worker model instances to enable true parallelism
-	sem := make(chan struct{}, 1) // Only 1 concurrent model access for now
+	// Distribute work evenly across workers
+	textsPerWorker := (len(texts) + workers - 1) / workers
 
 	var wg sync.WaitGroup
-	batchSize := r.options.BatchSize
-	if batchSize <= 0 {
-		batchSize = 1
-	}
-
-	for i := 0; i < len(texts); i += batchSize {
-		end := i + batchSize
+	for w := 0; w < workers; w++ {
+		start := w * textsPerWorker
+		end := start + textsPerWorker
 		if end > len(texts) {
 			end = len(texts)
+		}
+		if start >= len(texts) {
+			break
 		}
 
 		wg.Add(1)
 		go func(start, end int) {
 			defer wg.Done()
 
-			for j := start; j < end; j++ {
-				// Check context
+			for i := start; i < end; i++ {
+				// Check context cancellation
 				select {
 				case <-ctx.Done():
-					errors[j] = ctx.Err()
+					errors[i] = ctx.Err()
 					return
 				default:
 				}
 
-				// Acquire semaphore (ensure only 1 goroutine accesses model at a time)
-				sem <- struct{}{}
-				// Encode
-				embedding, err := r.embedSingle(texts[j])
-				<-sem // Release semaphore
-
+				// Embed single text (model is thread-safe for concurrent access)
+				embedding, err := r.embedSingle(texts[i])
 				if err != nil {
-					errors[j] = err
+					errors[i] = err
 				} else {
-					results[j] = embedding
+					results[i] = embedding
 				}
 			}
-		}(i, end)
+		}(start, end)
 	}
 
 	wg.Wait()
 
-	// Check for errors
+	// Return first error encountered
 	for _, err := range errors {
 		if err != nil {
 			return results, err
@@ -224,62 +215,6 @@ func (r *embedRuntime) Embed(ctx context.Context, texts []string) ([][]float32, 
 	}
 
 	return results, nil
-}
-
-// autoTuneWorkers determines the optimal number of worker threads based on batch size.
-//
-// Strategy (optimized for coarse-grained parallelism with DisableMatmulParallel=true):
-//   - Batch 1-4:   Use 1 worker (serial processing avoids goroutine overhead)
-//   - Batch 5-16:  Use min(batch, NumCPU/4) workers (light parallelism)
-//   - Batch 17-32: Use min(batch, NumCPU/2) workers (moderate parallelism)
-//   - Batch 33+:   Use min(batch, NumCPU) workers (full CPU utilization)
-//
-// Rationale:
-//   - Small batches: Serial processing is more efficient due to low goroutine overhead
-//   - Medium batches: Moderate parallelism balances throughput and latency
-//   - Large batches: Full CPU utilization maximizes throughput
-//   - Never exceed batch size: No benefit from idle workers
-//
-// This strategy is based on empirical benchmarks (see worker_tuning_test.go) which show:
-//   1. Diminishing returns beyond NumCPU workers
-//   2. Goroutine overhead dominates for small batches
-//   3. Optimal scaling when workers ≈ min(batch_size, NumCPU)
-//
-func (r *embedRuntime) autoTuneWorkers(totalTexts int) int {
-	numCPU := runtime.NumCPU()
-
-	// For single texts, always use 1 worker
-	if totalTexts == 1 {
-		return 1
-	}
-
-	// Small batches (1-4): Serial processing
-	if totalTexts <= 4 {
-		return 1
-	}
-
-	// Medium-small batches (5-16): Light parallelism
-	if totalTexts <= 16 {
-		workers := max(1, numCPU/4)
-		return min(workers, totalTexts)
-	}
-
-	// Medium batches (17-32): Moderate parallelism
-	if totalTexts <= 32 {
-		workers := max(1, numCPU/2)
-		return min(workers, totalTexts)
-	}
-
-	// Large batches (33+): Full CPU utilization
-	return min(numCPU, totalTexts)
-}
-
-// max returns the maximum of two integers
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // min returns the minimum of two integers

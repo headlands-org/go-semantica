@@ -42,25 +42,14 @@ type Model struct {
 	// For simplicity in MVP, we'll extract to float32
 	layers []Layer // DEPRECATED: not loaded (uses too much memory)
 
-	// INT8 layers (loaded lazily for zero-copy)
-	layersINT8     []*LayerINT8
-	layersINT8Once sync.Once
-	layersINT8Err  error // Store error from lazy loading
+	// INT8 layers (loaded eagerly during model initialization)
+	layersINT8 []*LayerINT8
 
 	// Final normalization (Gemma-specific)
 	outputNormWeight []float32 // [embDim]
 
 	// RoPE cache for fast position embeddings
 	ropeCache *kernels.RoPECache
-
-	// Buffers for inference (reusable scratch space)
-	scratch    []float32
-	bufferPool *sync.Pool // Pool of BufferPool instances for thread safety
-
-	// Buffer pools for hot path allocations (reduce GC pressure)
-	hiddenPool   *sync.Pool
-	residualPool *sync.Pool
-	tempPool     *sync.Pool // For temporary allocations (kExpanded, vExpanded, etc.)
 
 	// Configuration flags
 	disableMatmulParallel bool
@@ -175,36 +164,24 @@ func LoadModel(path string, disableMatmulParallel bool) (*Model, error) {
 		return nil, fmt.Errorf("load weights: %w", err)
 	}
 
-	// Allocate scratch buffer
-	// Size estimate: max_seq_len * embed_dim * 10 (conservative)
-	scratchSize := config.MaxSeqLen * config.EmbedDim * 10
-	model.scratch = make([]float32, scratchSize)
-
 	// Initialize RoPE cache if model uses RoPE
 	if config.UseRoPE {
 		model.ropeCache = kernels.NewRoPECache(config.HeadDim, config.RoPEBase, config.MaxSeqLen)
 	}
 
-	// Initialize buffer pool for inference
-	model.bufferPool = newBufferPool(config)
+	// Load INT8 layers eagerly (not lazily) to avoid sync.Once in hot path
+	model.layersINT8 = make([]*LayerINT8, config.NumLayers)
+	for i := 0; i < config.NumLayers; i++ {
+		layer, err := model.loadLayerINT8(i)
+		if err != nil {
+			reader.Close()
+			return nil, fmt.Errorf("load INT8 layer %d: %w", i, err)
+		}
+		model.layersINT8[i] = layer
+	}
 
-	// Initialize hot path buffer pools to reduce GC pressure
-	model.hiddenPool = &sync.Pool{
-		New: func() interface{} {
-			return make([]float32, config.MaxSeqLen*config.EmbedDim)
-		},
-	}
-	model.residualPool = &sync.Pool{
-		New: func() interface{} {
-			return make([]float32, config.MaxSeqLen*config.EmbedDim)
-		},
-	}
-	model.tempPool = &sync.Pool{
-		New: func() interface{} {
-			// Size for largest temporary allocation (kExpanded/vExpanded for GQA)
-			return make([]float32, config.MaxSeqLen*config.EmbedDim)
-		},
-	}
+	// Buffer allocation now happens directly in Forward() - no pooling
+	// This eliminates sync.Pool contention when multiple goroutines call Forward() concurrently
 
 	return model, nil
 }
@@ -615,126 +592,4 @@ func l2Normalize(v []float32) {
 	for i := range v {
 		v[i] /= norm
 	}
-}
-
-// runAttention runs the attention mechanism
-func (m *Model) runAttention(hidden []float32, layer *Layer, seqLen int) {
-	embDim := m.config.EmbedDim
-	nHeads := m.config.NumHeads
-	nKVHeads := m.config.NumKVHeads
-	headDim := m.config.HeadDim
-	kvDim := nKVHeads * headDim
-
-	// Allocate Q, K, V from scratch
-	qSize := seqLen * embDim
-	kvSize := seqLen * kvDim
-	q := m.scratch[0:qSize]
-	k := m.scratch[qSize : qSize+kvSize]
-	v := m.scratch[qSize+kvSize : qSize+2*kvSize]
-	attnOut := m.scratch[qSize+2*kvSize : qSize+2*kvSize+qSize]
-	attnScratch := m.scratch[qSize+2*kvSize+qSize:]
-
-	// Project Q, K, V (using ggml semantics: weight first, input second)
-	kernels.MatMulGGML(q, layer.qWeight, hidden, seqLen, embDim, embDim)
-	kernels.MatMulGGML(k, layer.kWeight, hidden, seqLen, embDim, kvDim)
-	kernels.MatMulGGML(v, layer.vWeight, hidden, seqLen, embDim, kvDim)
-
-	// Gemma-specific: Normalize Q and K after projection
-	if len(layer.qNormWeight) > 0 {
-		// Q is [seqLen, nHeads, headDim], normalize per head
-		for s := 0; s < seqLen; s++ {
-			for h := 0; h < nHeads; h++ {
-				offset := s*embDim + h*headDim
-				kernels.RMSNorm(
-					q[offset:offset+headDim],
-					q[offset:offset+headDim],
-					layer.qNormWeight,
-					m.config.NormEps,
-				)
-			}
-		}
-	}
-
-	if len(layer.kNormWeight) > 0 {
-		// K is [seqLen, nKVHeads, headDim], normalize per head
-		for s := 0; s < seqLen; s++ {
-			for h := 0; h < nKVHeads; h++ {
-				offset := s*kvDim + h*headDim
-				kernels.RMSNorm(
-					k[offset:offset+headDim],
-					k[offset:offset+headDim],
-					layer.kNormWeight,
-					m.config.NormEps,
-				)
-			}
-		}
-	}
-
-	// Apply RoPE if configured
-	if m.config.UseRoPE {
-		pos := make([]int, seqLen)
-		for i := range pos {
-			pos[i] = i
-		}
-		kernels.ApplyRoPE(q, seqLen, nHeads, headDim, pos, m.config.RoPEBase)
-		kernels.ApplyRoPE(k, seqLen, nKVHeads, headDim, pos, m.config.RoPEBase)
-	}
-
-	// For GQA, we need to expand K, V to match Q heads
-	// If nKVHeads == nHeads, this is regular MHA
-	// If nKVHeads < nHeads, we replicate KV groups
-	if nKVHeads < nHeads {
-		// Expand K, V by replicating each KV head for multiple Q heads
-		kExpanded := make([]float32, qSize)
-		vExpanded := make([]float32, qSize)
-		groupSize := nHeads / nKVHeads
-
-		for s := 0; s < seqLen; s++ {
-			for kvHead := 0; kvHead < nKVHeads; kvHead++ {
-				kSrc := k[s*kvDim+kvHead*headDim : s*kvDim+(kvHead+1)*headDim]
-				vSrc := v[s*kvDim+kvHead*headDim : s*kvDim+(kvHead+1)*headDim]
-
-				for g := 0; g < groupSize; g++ {
-					qHead := kvHead*groupSize + g
-					kDst := kExpanded[s*embDim+qHead*headDim : s*embDim+(qHead+1)*headDim]
-					vDst := vExpanded[s*embDim+qHead*headDim : s*embDim+(qHead+1)*headDim]
-					copy(kDst, kSrc)
-					copy(vDst, vSrc)
-				}
-			}
-		}
-
-		// Run attention with expanded K, V - use attention_scale instead of 1/sqrt(headDim)
-		kernels.MultiHeadAttentionWithScale(attnOut, q, kExpanded, vExpanded, 1, seqLen, nHeads, headDim, nil, m.config.AttentionScale, attnScratch)
-	} else {
-		// Regular MHA - use attention_scale instead of 1/sqrt(headDim)
-		kernels.MultiHeadAttentionWithScale(attnOut, q, k, v, 1, seqLen, nHeads, headDim, nil, m.config.AttentionScale, attnScratch)
-	}
-
-	// Project output (using ggml semantics: weight first, input second)
-	kernels.MatMulGGML(hidden, layer.oWeight, attnOut, seqLen, embDim, embDim)
-}
-
-// runMLP runs the MLP/FFN block (GeGLU for Gemma)
-func (m *Model) runMLP(hidden []float32, layer *Layer, seqLen int) {
-	embDim := m.config.EmbedDim
-	intermDim := m.config.IntermDim
-
-	// Allocate from scratch
-	gateSize := seqLen * intermDim
-	gate := m.scratch[0:gateSize]
-	up := m.scratch[gateSize : 2*gateSize]
-
-	// Gate and Up projections (using ggml semantics: weight first, input second)
-	kernels.MatMulGGML(gate, layer.gateWeight, hidden, seqLen, embDim, intermDim)
-	kernels.MatMulGGML(up, layer.upWeight, hidden, seqLen, embDim, intermDim)
-
-	// Apply GELU to gate - using fast approximation
-	kernels.GELUQuick(gate, gate, seqLen*intermDim)
-
-	// Element-wise multiply: gate * up
-	kernels.VecMulF32(gate, gate, up, seqLen*intermDim)
-
-	// Down projection (using ggml semantics: weight first, input second)
-	kernels.MatMulGGML(hidden, layer.downWeight, gate, seqLen, intermDim, embDim)
 }
