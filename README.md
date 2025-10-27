@@ -66,28 +66,27 @@ Tested with `embeddinggemma-300m-Q8_0.gguf` (314MB) on AMD Ryzen 9 7900 (24 core
 
 ### Performance Comparison vs llama.cpp
 
-| Scenario | pure-go-llamas | llama.cpp | Difference |
-|----------|---------------|-----------|------------|
-| **Single Short Doc (9w)** | 138ms | 210ms | **1.5× faster** ✨ |
-| **Single Long Doc (49w)** | 735ms | 230ms | 3.2× slower |
+| Scenario | pure-go-llamas | llama.cpp | Ratio |
+|----------|---------------|-----------|-------|
+| **Single Short Doc (9w)** | 138ms | 6ms | 23× slower |
+| **Single Long Doc (49w)** | 735ms | 18ms | 41× slower |
 | **Batch Short (96×)** | 82.9 emb/sec | N/A | - |
 | **Batch Long (96×)** | 13.1 emb/sec | N/A | - |
-| **Idle Memory** | 54 MB | ~300 MB | **5.6× less memory** |
+| **Idle Memory** | 54 MB | ~300 MB | **5.6× less** ✨ |
 
 ### Key Insights
 
-**Short documents**: Pure-Go is faster due to lower overhead and optimized coarse-grained parallelism.
+**Single-document latency**: llama.cpp is significantly faster due to highly optimized C++ SIMD kernels for matmul and attention operations. Our pure-Go implementation prioritizes portability and simplicity over raw single-threaded performance.
 
-**Long documents**: llama.cpp is faster due to more aggressive SIMD optimizations in attention and matmul kernels. We're actively working on closing this gap through:
-- Loop unrolling and FMA vectorization (targeting ~600ms)
-- SIMD-accelerated attention dot products
-- Further accumulation optimizations
+**Batch throughput**: Excellent scaling with coarse-grained parallelism (text-level worker pools). At high parallelism, the gap narrows as we saturate available CPU cores.
 
-**Batch throughput**: Excellent scaling with coarse-grained parallelism (text-level worker pools).
+**Memory efficiency**: Zero-copy mmap means we use **5-6× less memory** than llama.cpp's load-into-RAM approach. This is our key advantage for memory-constrained deployments.
 
-**Memory efficiency**: Zero-copy mmap means we use 5-6× less memory than llama.cpp's loaded-into-RAM approach.
-
-**Why fast?** Zero-copy mmap, AVX2 SIMD kernels, INT8 quantization, minimal allocations, cache-optimized block sizes.
+**Why use pure-go-llamas?**
+- **Pure Go**: No cgo, cross-compiles easily, simple deployment
+- **Low memory**: 5-6× less RAM than llama.cpp
+- **Good batch throughput**: Efficient parallelism for high-volume workloads
+- **Hackable**: Easy to understand and modify Go code vs complex C++
 
 ## License
 

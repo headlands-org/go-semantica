@@ -1,0 +1,14 @@
+=== ACTUAL INFERENCE TIME COMPARISON ===
+
+Short Document (9 words):
+- pure-go-llamas: 138 ms
+- llama.cpp: ~6 ms (prompt eval time)
+- Result: llama.cpp is 23× FASTER
+
+Long Document (49 words):
+- pure-go-llamas: 735 ms  
+- llama.cpp: ~18 ms (prompt eval time)
+- Result: llama.cpp is 41× FASTER
+
+We were measuring llama.cpp's total process time (model load + inference),
+not just inference time. Our implementation is significantly slower.
