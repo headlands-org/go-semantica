@@ -55,10 +55,6 @@ type Options struct {
 	// Larger batch sizes reduce goroutine overhead but increase latency per batch.
 	BatchSize int
 
-	// UseMmap controls whether to use memory-mapped I/O (true) or load into RAM (false)
-	// Default: true (use mmap for low memory footprint)
-	UseMmap bool
-
 	// Verbose enables verbose logging
 	Verbose bool
 }
@@ -87,20 +83,11 @@ func WithVerbose(v bool) Option {
 	}
 }
 
-// WithMmap controls whether to use memory-mapped I/O
-// If false, the entire model file is loaded into RAM
-func WithMmap(useMmap bool) Option {
-	return func(o *Options) {
-		o.UseMmap = useMmap
-	}
-}
-
 // Open opens a GGUF model file and returns a Runtime
 func Open(path string, opts ...Option) (Runtime, error) {
 	options := Options{
 		NumThreads: 0,     // 0 = auto-tune based on batch size
 		BatchSize:  1,
-		UseMmap:    true,  // default to mmap
 		Verbose:    false,
 	}
 
@@ -109,7 +96,7 @@ func Open(path string, opts ...Option) (Runtime, error) {
 	}
 
 	// Load model
-	model, err := modelrt.LoadModelWithOptions(path, options.UseMmap)
+	model, err := modelrt.LoadModel(path)
 	if err != nil {
 		return nil, fmt.Errorf("load model: %w", err)
 	}
