@@ -1,6 +1,10 @@
 #!/bin/bash
 # benchmark_llamacpp.sh
 # Runs llama.cpp embedding benchmarks matching our 5-scenario matrix
+#
+# NOTE: This script measures llama.cpp's actual INFERENCE time only,
+# using its internal "prompt eval time" metric. This excludes model
+# loading and other overhead for fair comparison with pure-go-llamas.
 
 set -e
 
@@ -81,33 +85,44 @@ measure_single_latency() {
 
     echo -e "${YELLOW}[$label] Running warmup (5 runs)...${NC}"
     for i in {1..5}; do
-        $EMBEDDING_BIN -m "$MODEL_PATH" -p "$doc" --embd-normalize 2 --log-disable > /dev/null 2>&1
+        $EMBEDDING_BIN -m "$MODEL_PATH" -p "$doc" --embd-normalize 2 > /dev/null 2>&1
     done
 
-    echo -e "${YELLOW}[$label] Measuring latency ($num_runs runs)...${NC}"
+    echo -e "${YELLOW}[$label] Measuring inference time ($num_runs runs)...${NC}"
 
-    # Run and collect timings
+    # Run and collect llama.cpp's internal prompt eval timings
     latencies=()
     for i in $(seq 1 $num_runs); do
-        timing=$( (time -p $EMBEDDING_BIN -m "$MODEL_PATH" -p "$doc" --embd-normalize 2 --log-disable > /dev/null 2>&1) 2>&1 | grep real | awk '{print $2}')
-        latencies+=($timing)
+        # Extract "prompt eval time" from llama.cpp's perf output
+        timing=$($EMBEDDING_BIN -m "$MODEL_PATH" -p "$doc" --embd-normalize 2 2>&1 | \
+                 grep "prompt eval time" | \
+                 awk '{print $6}')
+
+        if [ -n "$timing" ]; then
+            latencies+=($timing)
+        fi
     done
+
+    if [ ${#latencies[@]} -eq 0 ]; then
+        echo -e "${RED}Error: Could not extract timing from llama.cpp output${NC}"
+        return
+    fi
 
     # Sort and calculate percentiles
     sorted=($(printf '%s\n' "${latencies[@]}" | sort -n))
 
-    # Convert to milliseconds and calculate percentiles
-    p50_idx=$((num_runs / 2))
-    p95_idx=$((num_runs * 95 / 100))
-    p99_idx=$((num_runs * 99 / 100))
+    # Timings are already in milliseconds
+    p50_idx=$((${#sorted[@]} / 2))
+    p95_idx=$((${#sorted[@]} * 95 / 100))
+    p99_idx=$((${#sorted[@]} * 99 / 100))
 
-    p50=$(echo "${sorted[$p50_idx]} * 1000" | bc -l)
-    p95=$(echo "${sorted[$p95_idx]} * 1000" | bc -l)
-    p99=$(echo "${sorted[$p99_idx]} * 1000" | bc -l)
+    p50=${sorted[$p50_idx]}
+    p95=${sorted[$p95_idx]}
+    p99=${sorted[$p99_idx]}
 
-    printf "  P50: %.1f ms\n" $p50
-    printf "  P95: %.1f ms\n" $p95
-    printf "  P99: %.1f ms\n" $p99
+    printf "  P50: %.1f ms (inference only)\n" $p50
+    printf "  P95: %.1f ms (inference only)\n" $p95
+    printf "  P99: %.1f ms (inference only)\n" $p99
     echo ""
 }
 

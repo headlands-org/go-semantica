@@ -86,6 +86,15 @@ For now, the script only measures single-document latency (scenarios 1-3).
 
 ## Interpreting Results
 
+### What We Measure
+
+**llama.cpp**: Uses internal "prompt eval time" metric (inference only)
+- Excludes model loading (~160ms overhead per process)
+- Measures pure computation time for fair comparison
+
+**pure-go-llamas**: Measures inference time with model already loaded
+- Directly comparable to llama.cpp's prompt eval time
+
 ### Expected Differences
 
 **Memory:**
@@ -95,11 +104,11 @@ For now, the script only measures single-document latency (scenarios 1-3).
 
 **Latency:**
 - llama.cpp is highly optimized C++ with extensive SIMD
-- Expect llama.cpp to be 1.5-3× faster for single documents
-- Gap narrows with INT8 quantization
+- Current results: llama.cpp 20-40× faster on single documents
+- pure-go-llamas prioritizes portability and simplicity
 
 **Throughput:**
-- Both should saturate CPU at similar levels
+- Both saturate CPU effectively
 - pure-go-llamas uses coarse-grained parallelism (worker pools)
 - llama.cpp uses fine-grained parallelism within operations
 
