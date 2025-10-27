@@ -12,7 +12,7 @@ Pure-Go GGUF Runtime for Embedding Models - A pure Go (no cgo) implementation fo
 # Build CLI tools
 go build ./cmd/gemma-embed
 go build ./cmd/gguf-inspect
-go build ./cmd/gemma-benchmark
+go build ./cmd/benchmark
 
 # Build examples
 go build ./examples/similarity    # Simple similarity comparison
@@ -22,22 +22,22 @@ go build ./examples/batch          # Batch embedding generation
 ## Benchmark Commands
 
 ```bash
-# Run throughput benchmark in batch mode (single model, batched embeddings)
-./gemma-benchmark -model=model/embeddinggemma-300m-Q8_0.gguf -mode=batch -duration=10
+# Run comprehensive 5-scenario benchmark
+./benchmark -model=model/embeddinggemma-300m-Q8_0.gguf -mode=comprehensive
 
-# Run throughput benchmark in isolated mode (M independent model instances)
-./gemma-benchmark -model=model/embeddinggemma-300m-Q8_0.gguf -mode=isolated -duration=10 -workers=8
+# Run specific throughput tests
+./benchmark -model=model/embeddinggemma-300m-Q8_0.gguf -mode=batch -duration=10
+./benchmark -model=model/embeddinggemma-300m-Q8_0.gguf -mode=isolated -duration=10 -workers=8
 
-# Run with CPU profiling
-./gemma-benchmark -model=model/embeddinggemma-300m-Q8_0.gguf -mode=batch -duration=30 -cpuprofile=cpu.prof
-
-# Run with all profiling enabled
-./gemma-benchmark -model=model/embeddinggemma-300m-Q8_0.gguf -mode=batch -duration=30 \
-  -cpuprofile=cpu.prof -blockprofile=block.prof -mutexprofile=mutex.prof
+# Run with profiling
+./benchmark -model=model/embeddinggemma-300m-Q8_0.gguf -mode=batch -duration=30 -cpuprofile=cpu.prof
 
 # Analyze profiles
 go tool pprof cpu.prof
 go tool pprof -http=:8080 cpu.prof  # Web UI
+
+# Compare with llama.cpp (requires llama.cpp installation)
+./scripts/benchmark_llamacpp.sh model/embeddinggemma-300m-Q8_0.gguf ../llama.cpp
 ```
 
 ## Test Commands
