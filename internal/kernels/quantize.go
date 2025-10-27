@@ -9,8 +9,8 @@ import (
 // Values are quantized as: q = round(x / scale)
 // Dequantized as: x = q * scale
 type QuantizedTensorINT8 struct {
-	Data  []int8   // Quantized values [-127, 127]
-	Scale float32  // Scaling factor
+	Data  []int8  // Quantized values [-127, 127]
+	Scale float32 // Scaling factor
 	// For matrix ops: shape info
 	Rows int
 	Cols int
@@ -183,7 +183,7 @@ func MatMulINT8GGML(dst []float32, weight, input *QuantizedTensorINT8, batch, in
 				sum += inputVal * weightVal
 			}
 
-					dst[i*outDim+j] = float32(sum) * combinedScale
+			dst[i*outDim+j] = float32(sum) * combinedScale
 		}
 	}
 }

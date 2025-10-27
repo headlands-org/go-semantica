@@ -55,8 +55,8 @@ type Model struct {
 }
 
 type modelWorkspace struct {
-	hidden   []float32
-	residual []float32
+	hidden     []float32
+	residual   []float32
 	hiddenINT8 kernels.QuantizedTensorINT8
 
 	attention attentionWorkspace
@@ -64,20 +64,20 @@ type modelWorkspace struct {
 }
 
 type attentionWorkspace struct {
-	q         []float32
-	k         []float32
-	v         []float32
-	kExpanded []float32
-	vExpanded []float32
-	attnOut   []float32
-	scratch   []float32
-	positions []int
+	q           []float32
+	k           []float32
+	v           []float32
+	kExpanded   []float32
+	vExpanded   []float32
+	attnOut     []float32
+	scratch     []float32
+	positions   []int
 	attnOutINT8 kernels.QuantizedTensorINT8
 }
 
 type mlpWorkspace struct {
-	gate []float32
-	up   []float32
+	gate     []float32
+	up       []float32
 	gateINT8 kernels.QuantizedTensorINT8
 }
 

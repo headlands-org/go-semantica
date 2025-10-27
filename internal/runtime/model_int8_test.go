@@ -99,7 +99,7 @@ func TestExtractQ8_0Scales(t *testing.T) {
 		}
 
 		// Extract scales
-		extractedScales := extractQ8_0Scales(data)
+		extractedScales := extractQ8_0Scales(data, numBlocks*32)
 
 		// Verify length
 		if len(extractedScales) != numBlocks {
@@ -129,7 +129,7 @@ func TestExtractQ8_0Scales(t *testing.T) {
 
 	t.Run("EmptyData", func(t *testing.T) {
 		data := []byte{}
-		scales := extractQ8_0Scales(data)
+		scales := extractQ8_0Scales(data, 32)
 
 		if scales != nil {
 			t.Errorf("Expected nil for empty data, got %v", scales)
@@ -139,7 +139,7 @@ func TestExtractQ8_0Scales(t *testing.T) {
 	t.Run("PartialBlock", func(t *testing.T) {
 		// Less than one full block
 		data := make([]byte, 20)
-		scales := extractQ8_0Scales(data)
+		scales := extractQ8_0Scales(data, 32)
 
 		if scales != nil {
 			t.Errorf("Expected nil for partial block, got %v", scales)
@@ -154,7 +154,7 @@ func TestExtractQ8_0Scales(t *testing.T) {
 		}
 
 		data := createQ8_0Block(scale, values)
-		extractedScales := extractQ8_0Scales(data)
+		extractedScales := extractQ8_0Scales(data, 32)
 
 		if len(extractedScales) != 1 {
 			t.Fatalf("Expected 1 scale, got %d", len(extractedScales))
@@ -187,7 +187,7 @@ func TestExtractQ8_0Scales(t *testing.T) {
 		for i := 0; i < numBlocks; i++ {
 			var values [32]int8
 			for j := 0; j < 32; j++ {
-				values[j] = int8((i*j) % 256)
+				values[j] = int8((i * j) % 256)
 			}
 
 			blockData := createQ8_0Block(scales[i], values)
@@ -195,7 +195,7 @@ func TestExtractQ8_0Scales(t *testing.T) {
 		}
 
 		// Extract scales
-		extractedScales := extractQ8_0Scales(data)
+		extractedScales := extractQ8_0Scales(data, 32)
 
 		// Verify each scale matches ParseQ8_0Block exactly
 		for i := 0; i < numBlocks; i++ {
@@ -226,7 +226,7 @@ func TestExtractQ8_0Scales(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				var values [32]int8
 				data := createQ8_0Block(tc.scale, values)
-				extractedScales := extractQ8_0Scales(data)
+				extractedScales := extractQ8_0Scales(data, 32)
 
 				if len(extractedScales) != 1 {
 					t.Fatalf("Expected 1 scale, got %d", len(extractedScales))

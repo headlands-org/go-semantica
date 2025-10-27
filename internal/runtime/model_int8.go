@@ -69,48 +69,50 @@ func (m *Model) loadLayerINT8(layerIdx int) (*LayerINT8, error) {
 	m.loadTensorF32(prefix+".post_ffw_norm.weight", &layer.ffnPostNormWeight)
 
 	// Load Q8_0 weights as raw bytes (zero-copy views into GGUF)
+	embDim := m.config.EmbedDim
+	intermDim := m.config.IntermDim
 	var err error
 	layer.qWeightQ8, err = m.loadTensorQ8Bytes(prefix + ".attn_q.weight")
 	if err != nil {
 		return nil, err
 	}
-	layer.qWeightScales = extractQ8_0Scales(layer.qWeightQ8)
+	layer.qWeightScales = extractQ8_0Scales(layer.qWeightQ8, embDim)
 
 	layer.kWeightQ8, err = m.loadTensorQ8Bytes(prefix + ".attn_k.weight")
 	if err != nil {
 		return nil, err
 	}
-	layer.kWeightScales = extractQ8_0Scales(layer.kWeightQ8)
+	layer.kWeightScales = extractQ8_0Scales(layer.kWeightQ8, embDim)
 
 	layer.vWeightQ8, err = m.loadTensorQ8Bytes(prefix + ".attn_v.weight")
 	if err != nil {
 		return nil, err
 	}
-	layer.vWeightScales = extractQ8_0Scales(layer.vWeightQ8)
+	layer.vWeightScales = extractQ8_0Scales(layer.vWeightQ8, embDim)
 
 	layer.oWeightQ8, err = m.loadTensorQ8Bytes(prefix + ".attn_output.weight")
 	if err != nil {
 		return nil, err
 	}
-	layer.oWeightScales = extractQ8_0Scales(layer.oWeightQ8)
+	layer.oWeightScales = extractQ8_0Scales(layer.oWeightQ8, embDim)
 
 	layer.gateWeightQ8, err = m.loadTensorQ8Bytes(prefix + ".ffn_gate.weight")
 	if err != nil {
 		return nil, err
 	}
-	layer.gateWeightScales = extractQ8_0Scales(layer.gateWeightQ8)
+	layer.gateWeightScales = extractQ8_0Scales(layer.gateWeightQ8, embDim)
 
 	layer.upWeightQ8, err = m.loadTensorQ8Bytes(prefix + ".ffn_up.weight")
 	if err != nil {
 		return nil, err
 	}
-	layer.upWeightScales = extractQ8_0Scales(layer.upWeightQ8)
+	layer.upWeightScales = extractQ8_0Scales(layer.upWeightQ8, embDim)
 
 	layer.downWeightQ8, err = m.loadTensorQ8Bytes(prefix + ".ffn_down.weight")
 	if err != nil {
 		return nil, err
 	}
-	layer.downWeightScales = extractQ8_0Scales(layer.downWeightQ8)
+	layer.downWeightScales = extractQ8_0Scales(layer.downWeightQ8, intermDim)
 
 	return layer, nil
 }
@@ -398,30 +400,60 @@ func (m *Model) runMLPINT8(ws *modelWorkspace, output []float32, hiddenINT8 *ker
 // extractQ8_0Scales extracts float32 scales from raw Q8_0 quantized data
 // Q8_0 format: 34 bytes per block = [2-byte float16 scale] + [32 int8 values]
 // Returns one float32 scale per block
-func extractQ8_0Scales(data []byte) []float32 {
-	// Handle edge case: empty data
-	if len(data) == 0 {
+func extractQ8_0Scales(data []byte, cols int) []float32 {
+	if len(data) == 0 || cols <= 0 {
 		return nil
 	}
 
-	const blockSize = 34
-	numBlocks := len(data) / blockSize
-
-	// Handle edge case: partial block (shouldn't happen with valid Q8_0 data)
-	if numBlocks == 0 {
+	const blockBytes = 34
+	blocksPerRow := (cols + 31) / 32
+	bytesPerRow := blocksPerRow * blockBytes
+	rows := len(data) / bytesPerRow
+	if rows == 0 || blocksPerRow == 0 {
 		return nil
 	}
 
-	scales := make([]float32, numBlocks)
+	scales := make([]float32, rows*blocksPerRow)
 
-	for i := 0; i < numBlocks; i++ {
-		offset := i * blockSize
-		// Parse the scale using existing Q8_0 block parser
-		block := gguf.ParseQ8_0Block(data[offset : offset+blockSize])
-		scales[i] = block.Scale
+	for r := 0; r < rows; r++ {
+		rowOffset := r * bytesPerRow
+		scaleBase := r * blocksPerRow
+		for b := 0; b < blocksPerRow; b++ {
+			offset := rowOffset + b*blockBytes
+			scaleBits := uint16(data[offset]) | uint16(data[offset+1])<<8
+			scales[scaleBase+b] = float16ToFloat32(scaleBits)
+		}
 	}
 
 	return scales
+}
+
+func float16ToFloat32(f16 uint16) float32 {
+	sign := (f16 >> 15) & 0x1
+	exponent := (f16 >> 10) & 0x1f
+	fraction := f16 & 0x3ff
+
+	if exponent == 0 {
+		if fraction == 0 {
+			return math.Float32frombits(uint32(sign) << 31)
+		}
+		// Subnormal number
+		for fraction&0x400 == 0 {
+			fraction <<= 1
+			exponent--
+		}
+		exponent++
+		fraction &= 0x3ff
+	} else if exponent == 0x1f {
+		// Inf or NaN
+		return math.Float32frombits((uint32(sign) << 31) | 0x7f800000 | (uint32(fraction) << 13))
+	}
+
+	// Normalized number
+	exponent32 := uint32(exponent) + (127 - 15)
+	fraction32 := uint32(fraction) << 13
+
+	return math.Float32frombits((uint32(sign) << 31) | (exponent32 << 23) | fraction32)
 }
 
 func ensureFloat32(buf *[]float32, size int) []float32 {
