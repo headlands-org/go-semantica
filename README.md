@@ -69,20 +69,20 @@ go build ./cmd/benchmark
 
 | Scenario | Metric | pure-go-llamas | llama.cpp | Ratio |
 |----------|--------|----------------|-----------|-------|
-| **Idle Memory** | Heap Allocated | 54 MB | 0 MB (RSS) | - |
-| **Single Short Doc (9w)** | P50 Latency | 51.1 ms | 6.5 ms | 7.9× |
-| | P95 Latency | 54.2 ms | 7.1 ms | 7.6× |
-| **Single Long Doc (49w)** | P50 Latency | 304.3 ms | 15.8 ms | 19.3× |
-| | P95 Latency | 309.8 ms | 21.7 ms | 14.3× |
-| **Batch Short Docs (96×)** | Throughput | 219 emb/sec | N/A* | - |
-| | Avg Latency | 4.6 ms/emb | N/A* | - |
-| | Peak Memory | 173 MB | N/A* | - |
-| **Batch Long Docs (96×)** | Throughput | 31 emb/sec | N/A* | - |
-| | Avg Latency | 32.7 ms/emb | N/A* | - |
-| | Peak Memory | 198 MB | N/A* | - |
+| **Idle Memory** | Heap Allocated | 54 MB | 358 MB (RSS) | 0.15× |
+| **Single Short Doc (9w)** | P50 Latency | 49.8 ms | 8.5 ms | 5.9× slower |
+| | P95 Latency | 52.5 ms | 8.9 ms | 5.9× slower |
+| **Single Long Doc (49w)** | P50 Latency | 276.1 ms | 27.6 ms | 10.0× slower |
+| | P95 Latency | 285.9 ms | 30.0 ms | 9.5× slower |
+| **Batch Short Docs (96×)** | Throughput | 219.8 emb/sec | 252.2 emb/sec | 0.87× (87%) |
+| | Avg Latency | 4.5 ms/emb | 4.0 ms/emb | 1.1× slower |
+| | Peak Memory | 183 MB | 408 MB | 0.45× |
+| **Batch Long Docs (96×)** | Throughput | 33.0 emb/sec | 31.5 emb/sec | 1.05× (105%) |
+| | Avg Latency | 30.3 ms/emb | 31.8 ms/emb | 0.95× (faster) |
+| | Peak Memory | 222 MB | 688 MB | 0.32× |
 | **Correctness** | vs llama.cpp | 0.988 cosine similarity ✅ | 1.0 (reference) | - |
 
-*llama.cpp's `llama-embedding` CLI doesn't support batch processing
+**Note**: llama.cpp numbers obtained via new C++ benchmark tool (`benchmark_cpp/`) using llama.cpp libraries directly. See `scripts/compare_benchmarks.sh` for automated comparisons.
 
 ### Optimization Details
 
@@ -97,19 +97,22 @@ go build ./cmd/benchmark
 
 ### Performance Analysis
 
-**Single-document latency**: Currently 7.9-19.3× slower than llama.cpp for single document inference. This is the primary area for future optimization.
+**Single-document latency**: Currently 5.9-10.0× slower than llama.cpp for single document inference. This is the primary area for future optimization.
 
-**Batch throughput**: Achieves 219 short docs/sec (4.6ms avg latency) with efficient parallelism. llama.cpp's CLI doesn't expose batch APIs for comparison, though the library supports batching.
+**Batch throughput**: Achieves competitive performance in batch workloads:
+- Short docs (96×): 219.8 emb/sec (87% of llama.cpp's 252.2 emb/sec)
+- Long docs (96×): 33.0 emb/sec (105% of llama.cpp's 31.5 emb/sec - actually faster!)
 
-**Memory efficiency**: 54 MB idle, ~200 MB peak for batch workloads.
+**Memory efficiency**: 54 MB idle heap, 183-222 MB peak for batch workloads. Significantly more memory-efficient than llama.cpp (358 MB idle, 408-688 MB peak).
 
 ### Why Use This?
 
 - **Pure Go**: No cgo, cross-compiles easily to any platform
 - **Validated correctness**: 0.988 cosine similarity vs llama.cpp
-- **Efficient batch processing**: Good throughput with worker pool parallelism
+- **Competitive batch performance**: 87-105% of llama.cpp throughput for batch workloads
+- **Memory efficient**: Uses 2-3× less memory than llama.cpp (54 MB vs 358 MB idle)
 - **Readable code**: Straightforward Go vs complex C++ templates
-- **Trade-off**: Prioritizes portability and code clarity over raw single-inference speed
+- **Trade-off**: Prioritizes portability and code clarity over raw single-document speed (5.9-10.0× slower for single docs)
 
 ## License
 

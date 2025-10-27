@@ -23,3 +23,8 @@ examples/test-components/test-components
 # OS files
 .DS_Store
 Thumbs.db
+
+# C++ benchmark build artifacts
+benchmark_cpp/build/
+benchmark_cpp/*.o
+benchmark_cpp/benchmark_cpp
