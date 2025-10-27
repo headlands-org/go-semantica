@@ -7,7 +7,15 @@ set -e
 # Configuration
 MODEL_PATH="${1:-model/embeddinggemma-300m-Q8_0.gguf}"
 LLAMACPP_DIR="${2:-../llama.cpp}"
-EMBEDDING_BIN="$LLAMACPP_DIR/embedding"
+
+# Check for llama.cpp embedding binary (system-wide or local build)
+if command -v llama-embedding &> /dev/null; then
+    EMBEDDING_BIN="llama-embedding"
+elif [ -f "$LLAMACPP_DIR/embedding" ]; then
+    EMBEDDING_BIN="$LLAMACPP_DIR/embedding"
+else
+    EMBEDDING_BIN=""
+fi
 
 # Test documents (must match cmd/benchmark/main.go exactly)
 SHORT_DOC="The quick brown fox jumps over the lazy dog"
@@ -32,10 +40,13 @@ echo "=== Llama.cpp Benchmark Runner ==="
 echo ""
 
 # Check if llama.cpp embedding binary exists
-if [ ! -f "$EMBEDDING_BIN" ]; then
-    echo -e "${RED}Error: llama.cpp embedding binary not found at $EMBEDDING_BIN${NC}"
+if [ -z "$EMBEDDING_BIN" ]; then
+    echo -e "${RED}Error: llama.cpp embedding binary not found${NC}"
     echo ""
-    echo "To build llama.cpp:"
+    echo "To install llama.cpp (Arch Linux):"
+    echo "  yay -S llama.cpp"
+    echo ""
+    echo "Or to build from source:"
     echo "  git clone https://github.com/ggerganov/llama.cpp $LLAMACPP_DIR"
     echo "  cd $LLAMACPP_DIR"
     echo "  make -j"
