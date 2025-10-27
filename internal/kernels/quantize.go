@@ -214,16 +214,21 @@ func MatMulQ8_0INT8Fast(dst []float32, weight *Q8_0Tensor, input *QuantizedTenso
 // matMulQ8_0INT8FastSerial is the serial implementation
 func matMulQ8_0INT8FastSerial(dst []float32, weight *Q8_0Tensor, input *QuantizedTensorINT8, batch, inDim, outDim int) {
 	blocksPerRow := (inDim + 31) / 32
+	inputScale := input.Scale
 
 	for i := 0; i < batch; i++ {
+		inputOffset := i * inDim
+
 		for j := 0; j < outDim; j++ {
 			sum := float32(0)
+			weightOffset := j * inDim
+			scaleBaseIdx := j * blocksPerRow
 
 			// Process weight row j in blocks of 32
+			// OPTIMIZATION: Hoist inputScale multiplication outside block loop
 			for blockIdx := 0; blockIdx < blocksPerRow; blockIdx++ {
 				// Get scale for this block (pre-converted to float32)
-				scaleIdx := j*blocksPerRow + blockIdx
-				scale := weight.Scales[scaleIdx]
+				scale := weight.Scales[scaleBaseIdx+blockIdx]
 
 				// Block boundaries
 				blockStart := blockIdx * 32
@@ -234,15 +239,16 @@ func matMulQ8_0INT8FastSerial(dst []float32, weight *Q8_0Tensor, input *Quantize
 				blockSize := blockEnd - blockStart
 
 				// Dot product with SIMD
-				inputSlice := input.Data[i*inDim+blockStart : i*inDim+blockStart+blockSize]
-				weightSlice := weight.Qs[j*inDim+blockStart : j*inDim+blockStart+blockSize]
+				inputSlice := input.Data[inputOffset+blockStart : inputOffset+blockStart+blockSize]
+				weightSlice := weight.Qs[weightOffset+blockStart : weightOffset+blockStart+blockSize]
 				blockSum := dotProductINT8SIMD(inputSlice, weightSlice, blockSize)
 
-				// Dequantize: INT32 accumulator * Q8_0 scale * input scale
-				sum += float32(blockSum) * scale * input.Scale
+				// Accumulate without inputScale (apply once at end)
+				sum += float32(blockSum) * scale
 			}
 
-			dst[i*outDim+j] = sum
+			// Apply inputScale once at the end instead of per-block
+			dst[i*outDim+j] = sum * inputScale
 		}
 	}
 }
@@ -288,52 +294,57 @@ func MatMulQ8_0INT8(dst []float32, weightData []byte, scales []float32, input *Q
 
 // matMulQ8_0INT8Serial is the serial implementation
 func matMulQ8_0INT8Serial(dst []float32, weightData []byte, scales []float32, input *QuantizedTensorINT8, batch, inDim, outDim, blocksPerRow, bytesPerRow int) {
+	// Hoist constant values
+	inputScale := input.Scale
+	fullBlocks := inDim / 32
+	hasPartialBlock := inDim%32 != 0
+
 	// For each output position
 	for i := 0; i < batch; i++ {
+		inputOffset := i * inDim
+
 		for j := 0; j < outDim; j++ {
 			sum := float32(0)
 
 			// Weight row j starts at offset j * bytesPerRow
 			weightRowOffset := j * bytesPerRow
-
-			// Hoist input scale lookup
-			inputScale := input.Scale
+			scaleBaseIdx := j * blocksPerRow
 
 			// Process full blocks of 32 (fast path)
-			fullBlocks := inDim / 32
+			// OPTIMIZATION: Hoist inputScale multiplication outside block loop
 			for blockIdx := 0; blockIdx < fullBlocks; blockIdx++ {
 				blockOffset := weightRowOffset + blockIdx*34
-				scaleIdx := j*blocksPerRow + blockIdx
-				scale := scales[scaleIdx]
+				scale := scales[scaleBaseIdx+blockIdx]
 				qsOffset := blockOffset + 2
 				blockStart := blockIdx * 32
 
 				// Direct assembly call - bypass dispatcher overhead
-				inputPtr := (*int8)(unsafe.Pointer(&input.Data[i*inDim+blockStart]))
+				inputPtr := (*int8)(unsafe.Pointer(&input.Data[inputOffset+blockStart]))
 				weightPtr := (*int8)(unsafe.Pointer(&weightData[qsOffset]))
 				blockSum := dotProductINT8Asm(inputPtr, weightPtr, 32)
 
-				sum += float32(blockSum) * scale * inputScale
+				// Accumulate without inputScale (apply once at end)
+				sum += float32(blockSum) * scale
 			}
 
 			// Handle partial block if needed
-			if inDim%32 != 0 {
+			if hasPartialBlock {
 				blockIdx := fullBlocks
 				blockOffset := weightRowOffset + blockIdx*34
-				scaleIdx := j*blocksPerRow + blockIdx
-				scale := scales[scaleIdx]
+				scale := scales[scaleBaseIdx+blockIdx]
 				qsOffset := blockOffset + 2
 				blockStart := blockIdx * 32
 				blockSize := inDim - blockStart
 
-				inputSlice := input.Data[i*inDim+blockStart : i*inDim+blockStart+blockSize]
+				inputSlice := input.Data[inputOffset+blockStart : inputOffset+blockStart+blockSize]
 				weightSlice := unsafe.Slice((*int8)(unsafe.Pointer(&weightData[qsOffset])), blockSize)
 				blockSum := dotProductINT8SIMD(inputSlice, weightSlice, blockSize)
 
-				sum += float32(blockSum) * scale * inputScale
+				sum += float32(blockSum) * scale
 			}
 
-			dst[i*outDim+j] = sum
+			// Apply inputScale once at the end instead of per-block
+			dst[i*outDim+j] = sum * inputScale
 		}
 	}
 }
