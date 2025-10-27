@@ -11,19 +11,19 @@ import (
 // LayerINT8 holds raw Q8_0 weight data for INT8 inference (zero-copy)
 type LayerINT8 struct {
 	// Attention weights as raw Q8_0 bytes (direct views into GGUF)
-	qWeightQ8  []byte // [embDim, embDim]
+	qWeightQ8 []byte // [embDim, embDim]
 	// Pre-converted float32 scales (one per 32-element block, extracted from Q8_0)
 	qWeightScales []float32
 
-	kWeightQ8  []byte // [embDim, kvDim]
+	kWeightQ8 []byte // [embDim, kvDim]
 	// Pre-converted float32 scales (one per 32-element block, extracted from Q8_0)
 	kWeightScales []float32
 
-	vWeightQ8  []byte // [embDim, kvDim]
+	vWeightQ8 []byte // [embDim, kvDim]
 	// Pre-converted float32 scales (one per 32-element block, extracted from Q8_0)
 	vWeightScales []float32
 
-	oWeightQ8  []byte // [embDim, embDim]
+	oWeightQ8 []byte // [embDim, embDim]
 	// Pre-converted float32 scales (one per 32-element block, extracted from Q8_0)
 	oWeightScales []float32
 
@@ -32,7 +32,7 @@ type LayerINT8 struct {
 	// Pre-converted float32 scales (one per 32-element block, extracted from Q8_0)
 	gateWeightScales []float32
 
-	upWeightQ8   []byte // [embDim, intermDim]
+	upWeightQ8 []byte // [embDim, intermDim]
 	// Pre-converted float32 scales (one per 32-element block, extracted from Q8_0)
 	upWeightScales []float32
 
@@ -149,9 +149,9 @@ func (m *Model) ForwardINT8(tokenIDs []int) ([]float32, error) {
 
 	embDim := m.config.EmbedDim
 
-	// Allocate hidden and residual buffers (no pooling eliminates sync.Pool contention)
-	hidden := make([]float32, seqLen*embDim)
-	residual := make([]float32, seqLen*embDim)
+	// Reuse persistent work buffers to avoid per-call allocation churn
+	hidden := ensureFloat32(&m.workspace.hidden, seqLen*embDim)
+	residual := ensureFloat32(&m.workspace.residual, seqLen*embDim)
 
 	// Embed tokens (on-the-fly Q8_0 dequantization for zero-copy)
 	bytesPerRow := ((embDim + 31) / 32) * 34 // Q8_0: (numBlocks * 34 bytes)
@@ -285,10 +285,12 @@ func (m *Model) runAttentionINT8(output []float32, hiddenINT8 *kernels.Quantized
 	headDim := m.config.HeadDim
 	kvDim := nKVHeads * headDim
 
-	// Allocate buffers for Q, K, V projections
-	q := make([]float32, seqLen*embDim)
-	k := make([]float32, seqLen*kvDim)
-	v := make([]float32, seqLen*kvDim)
+	attn := &m.workspace.attention
+
+	// Reuse buffers for Q, K, V projections
+	q := ensureFloat32(&attn.q, seqLen*embDim)
+	k := ensureFloat32(&attn.k, seqLen*kvDim)
+	v := ensureFloat32(&attn.v, seqLen*kvDim)
 
 	// Project using INT8 x Q8_0 matmul (raw bytes, zero-copy)
 	kernels.MatMulQ8_0INT8(q, layer.qWeightQ8, layer.qWeightScales, hiddenINT8, seqLen, embDim, embDim)
@@ -315,8 +317,8 @@ func (m *Model) runAttentionINT8(output []float32, hiddenINT8 *kernels.Quantized
 
 	// Apply RoPE (FP32)
 	if m.config.UseRoPE {
-		pos := make([]int, seqLen)
-		for i := range pos {
+		pos := ensureInt(&attn.positions, seqLen)
+		for i := 0; i < seqLen; i++ {
 			pos[i] = i
 		}
 		// Use cached RoPE for fast position embeddings
@@ -326,13 +328,11 @@ func (m *Model) runAttentionINT8(output []float32, hiddenINT8 *kernels.Quantized
 
 	// For GQA, expand K, V
 	var kExpanded, vExpanded []float32
-	var kExpandedBuf, vExpandedBuf []float32
 	if nKVHeads < nHeads {
-		// Allocate temporary expansion buffers directly
-		kExpandedBuf = make([]float32, seqLen*embDim)
-		vExpandedBuf = make([]float32, seqLen*embDim)
+		kExpandedBuf := ensureFloat32(&attn.kExpanded, seqLen*embDim)
+		vExpandedBuf := ensureFloat32(&attn.vExpanded, seqLen*embDim)
 
-		kExpanded = kExpandedBuf
+		kExpanded = kExpandedBuf[:seqLen*embDim]
 		vExpanded = vExpandedBuf[:seqLen*embDim]
 		groupSize := nHeads / nKVHeads
 
@@ -353,9 +353,9 @@ func (m *Model) runAttentionINT8(output []float32, hiddenINT8 *kernels.Quantized
 		vExpanded = v
 	}
 
-	// Run attention (FP32) - allocate output and scratch buffers
-	attnOut := make([]float32, seqLen*embDim)
-	attnScratch := make([]float32, seqLen*seqLen*nHeads)
+	// Run attention (FP32) using reusable scratch buffers
+	attnOut := ensureFloat32(&attn.attnOut, seqLen*embDim)
+	attnScratch := ensureFloat32(&attn.scratch, seqLen*seqLen*nHeads)
 	kernels.MultiHeadAttentionWithScale(attnOut, q, kExpanded, vExpanded, 1, seqLen, nHeads, headDim, nil, m.config.AttentionScale, attnScratch)
 
 	// Quantize attention output
@@ -363,8 +363,6 @@ func (m *Model) runAttentionINT8(output []float32, hiddenINT8 *kernels.Quantized
 
 	// Project output with INT8 (raw bytes, zero-copy)
 	kernels.MatMulQ8_0INT8(output, layer.oWeightQ8, layer.oWeightScales, &attnOutINT8, seqLen, embDim, embDim)
-
-	// Buffers will be garbage collected automatically
 }
 
 // runMLPINT8 runs MLP with INT8 activations
@@ -372,9 +370,10 @@ func (m *Model) runMLPINT8(output []float32, hiddenINT8 *kernels.QuantizedTensor
 	embDim := m.config.EmbedDim
 	intermDim := m.config.IntermDim
 
-	// Allocate buffers for gate and up projections
-	gate := make([]float32, seqLen*intermDim)
-	up := make([]float32, seqLen*intermDim)
+	// Reuse buffers for gate and up projections
+	mlp := &m.workspace.mlp
+	gate := ensureFloat32(&mlp.gate, seqLen*intermDim)
+	up := ensureFloat32(&mlp.up, seqLen*intermDim)
 
 	// Gate and up projections with INT8 (raw bytes, zero-copy)
 	kernels.MatMulQ8_0INT8(gate, layer.gateWeightQ8, layer.gateWeightScales, hiddenINT8, seqLen, embDim, intermDim)
@@ -420,4 +419,18 @@ func extractQ8_0Scales(data []byte) []float32 {
 	}
 
 	return scales
+}
+
+func ensureFloat32(buf *[]float32, size int) []float32 {
+	if cap(*buf) < size {
+		*buf = make([]float32, size)
+	}
+	return (*buf)[:size]
+}
+
+func ensureInt(buf *[]int, size int) []int {
+	if cap(*buf) < size {
+		*buf = make([]int, size)
+	}
+	return (*buf)[:size]
 }

@@ -8,6 +8,7 @@ import "golang.org/x/sys/cpu"
 var (
 	hasNEON = cpu.ARM64.HasASIMD   // Advanced SIMD (NEON) - always available on ARM64
 	hasSDOT = cpu.ARM64.HasASIMDDP // Dot Product instructions (ARMv8.2+)
+	hasAVX2 = cpu.ARM64.HasASIMD   // Reuse flag to enable SIMD paths in shared code
 )
 
 // dotProductNEONAsm is the ARM NEON assembly implementation
@@ -91,3 +92,15 @@ func dotProductINT8SIMD(a, b []int8, n int) int32 {
 	}
 	return sum
 }
+
+// vecMulF32SIMD multiplies float32 vectors element-wise using NEON assembly.
+//go:noescape
+func vecMulF32SIMD(dst, a, b *float32, n int)
+
+// vecAddF32SIMD adds float32 vectors element-wise using NEON assembly.
+//go:noescape
+func vecAddF32SIMD(dst, a, b *float32, n int)
+
+// vecScaleF32SIMD scales a float32 vector by a scalar using NEON assembly.
+//go:noescape
+func vecScaleF32SIMD(dst, a *float32, scale float32, n int)

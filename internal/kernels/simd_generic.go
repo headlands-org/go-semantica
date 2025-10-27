@@ -2,6 +2,8 @@
 
 package kernels
 
+import "unsafe"
+
 // SIMD not available on this platform
 var (
 	hasAVX2   = false
@@ -41,9 +43,9 @@ func dotProductINT8SIMD(a, b []int8, n int) int32 {
 // dst[i] = a[i] * b[i]
 func vecMulF32SIMD(dst, a, b *float32, n int) {
 	// Convert pointers to slices for bounds checking
-	dstSlice := (*[1 << 30]float32)(dst)[:n:n]
-	aSlice := (*[1 << 30]float32)(a)[:n:n]
-	bSlice := (*[1 << 30]float32)(b)[:n:n]
+	dstSlice := unsafe.Slice(dst, n)
+	aSlice := unsafe.Slice(a, n)
+	bSlice := unsafe.Slice(b, n)
 
 	for i := 0; i < n; i++ {
 		dstSlice[i] = aSlice[i] * bSlice[i]
@@ -54,9 +56,9 @@ func vecMulF32SIMD(dst, a, b *float32, n int) {
 // dst[i] = a[i] + b[i]
 func vecAddF32SIMD(dst, a, b *float32, n int) {
 	// Convert pointers to slices for bounds checking
-	dstSlice := (*[1 << 30]float32)(dst)[:n:n]
-	aSlice := (*[1 << 30]float32)(a)[:n:n]
-	bSlice := (*[1 << 30]float32)(b)[:n:n]
+	dstSlice := unsafe.Slice(dst, n)
+	aSlice := unsafe.Slice(a, n)
+	bSlice := unsafe.Slice(b, n)
 
 	for i := 0; i < n; i++ {
 		dstSlice[i] = aSlice[i] + bSlice[i]
@@ -67,8 +69,8 @@ func vecAddF32SIMD(dst, a, b *float32, n int) {
 // dst[i] = a[i] * scale
 func vecScaleF32SIMD(dst, a *float32, scale float32, n int) {
 	// Convert pointers to slices for bounds checking
-	dstSlice := (*[1 << 30]float32)(dst)[:n:n]
-	aSlice := (*[1 << 30]float32)(a)[:n:n]
+	dstSlice := unsafe.Slice(dst, n)
+	aSlice := unsafe.Slice(a, n)
 
 	for i := 0; i < n; i++ {
 		dstSlice[i] = aSlice[i] * scale

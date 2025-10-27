@@ -4,7 +4,6 @@ package runtime
 import (
 	"fmt"
 	"math"
-	"sync"
 
 	"github.com/lth/pure-go-llamas/internal/gguf"
 	"github.com/lth/pure-go-llamas/internal/kernels"
@@ -17,9 +16,9 @@ type ModelConfig struct {
 	EmbedDim       int
 	NumLayers      int
 	NumHeads       int
-	NumKVHeads     int     // For Grouped Query Attention
+	NumKVHeads     int // For Grouped Query Attention
 	HeadDim        int
-	IntermDim      int     // MLP intermediate dimension
+	IntermDim      int // MLP intermediate dimension
 	MaxSeqLen      int
 	NormEps        float32
 	RoPEBase       float32
@@ -50,60 +49,32 @@ type Model struct {
 
 	// RoPE cache for fast position embeddings
 	ropeCache *kernels.RoPECache
+
+	workspace modelWorkspace
 }
 
-// BufferPool manages pre-allocated buffers for inference
-type BufferPool struct {
-	// Large pre-allocated buffer
-	buffer []float32
+type modelWorkspace struct {
+	hidden   []float32
+	residual []float32
 
-	// Buffer offsets (computed based on maxSeqLen and config)
-	qkvOffset     int // Q, K, V projections
-	attnOffset    int // Attention output
-	scratchOffset int // Attention scratch
-	mlpOffset     int // MLP gate/up
+	attention attentionWorkspace
+	mlp       mlpWorkspace
 }
 
-// newBufferPool creates a sync.Pool that returns per-goroutine buffers
-func newBufferPool(cfg ModelConfig) *sync.Pool {
-	maxSeqLen := cfg.MaxSeqLen
-	embDim := cfg.EmbedDim
-	kvDim := cfg.NumKVHeads * cfg.HeadDim
-	intermDim := cfg.IntermDim
-	nHeads := cfg.NumHeads
+type attentionWorkspace struct {
+	q         []float32
+	k         []float32
+	v         []float32
+	kExpanded []float32
+	vExpanded []float32
+	attnOut   []float32
+	scratch   []float32
+	positions []int
+}
 
-	// Calculate buffer sizes
-	qkvSize := maxSeqLen * (embDim + kvDim*2)           // Q + K + V
-	attnSize := maxSeqLen * embDim                       // Attention output
-	scratchSize := maxSeqLen * maxSeqLen * nHeads        // Attention scratch
-	mlpSize := maxSeqLen * intermDim * 2                 // Gate + Up
-
-	// Calculate offsets
-	offset := 0
-	qkvOffset := offset
-	offset += qkvSize
-	attnOffset := offset
-	offset += attnSize
-	scratchOffset := offset
-	offset += scratchSize
-	mlpOffset := offset
-	offset += mlpSize
-
-	// Total size for buffer
-	totalSize := offset
-
-	// Return a sync.Pool that creates new BufferPool instances on demand
-	return &sync.Pool{
-		New: func() interface{} {
-			return &BufferPool{
-				buffer:        make([]float32, totalSize),
-				qkvOffset:     qkvOffset,
-				attnOffset:    attnOffset,
-				scratchOffset: scratchOffset,
-				mlpOffset:     mlpOffset,
-			}
-		},
-	}
+type mlpWorkspace struct {
+	gate []float32
+	up   []float32
 }
 
 // Layer represents a transformer encoder layer
