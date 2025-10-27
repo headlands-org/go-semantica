@@ -6,7 +6,7 @@ import "golang.org/x/sys/cpu"
 
 // SIMD support flags for ARM64
 var (
-	hasNEON = cpu.ARM64.HasASIMD // Advanced SIMD (NEON) - always available on ARM64
+	hasNEON = cpu.ARM64.HasASIMD   // Advanced SIMD (NEON) - always available on ARM64
 	hasSDOT = cpu.ARM64.HasASIMDDP // Dot Product instructions (ARMv8.2+)
 )
 
@@ -22,6 +22,12 @@ func dotProductNEONAsm(a, b *float32, n int) float32
 //
 //go:noescape
 func dotProductSDOTAsm(a, b *int8, n int) int32
+
+// matmulInnerLoopAsm processes full 32-element blocks using the fastest available instructions
+// on ARM64. Implemented in simd_arm64_matmul.s, falls back to Go when assembly is disabled.
+//
+//go:noescape
+func matmulInnerLoopAsm(inputRow *int8, weightData *byte, scales *float32, numBlocks int) float32
 
 // dotProductINT8Asm is the direct assembly call without dispatcher overhead
 // IMPORTANT: Caller must ensure slices are valid and n >= 16 for SIMD
