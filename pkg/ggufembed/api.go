@@ -47,10 +47,6 @@ type Options struct {
 	//
 	// If set > 0: Uses the specified number of workers (no auto-tuning).
 	//
-	// Note: When DisableMatmulParallel=false (default), this controls coarse-grained
-	// parallelism (across texts) while matmul uses fine-grained parallelism (within ops).
-	// When DisableMatmulParallel=true, this is the only parallelism mechanism.
-	//
 	// Default: 0 (auto-tune)
 	NumThreads int
 
@@ -61,27 +57,6 @@ type Options struct {
 
 	// Verbose enables verbose logging
 	Verbose bool
-
-	// DisableMatmulParallel disables internal matrix multiplication parallelism.
-	// When true, matmul operations run serially, relying on coarse-grained parallelism
-	// via NumThreads to process multiple texts in parallel. **Recommended for batch workloads.**
-	// When false, uses fine-grained parallelism within matmul operations.
-	//
-	// **Performance Impact** (validated via profiling):
-	//   - Batch >= 8 with DisableMatmulParallel=true: 34% faster, 9600x fewer goroutines
-	//   - Single text: minimal difference (within 5%)
-	//
-	// Set to true when:
-	//   - Processing batches of texts (batch >= 8) - **RECOMMENDED**
-	//   - You want predictable single-text latency
-	//   - You control parallelism at the application level
-	//
-	// Set to false when:
-	//   - Processing single texts in isolation
-	//   - You want maximum single-text throughput with nested parallelism
-	//
-	// Default: true (optimized for batch workloads)
-	DisableMatmulParallel bool
 }
 
 // Option is a functional option for configuring the runtime
@@ -108,20 +83,12 @@ func WithVerbose(v bool) Option {
 	}
 }
 
-// WithDisableMatmulParallel disables internal matrix multiplication parallelism
-func WithDisableMatmulParallel(disable bool) Option {
-	return func(o *Options) {
-		o.DisableMatmulParallel = disable
-	}
-}
-
 // Open opens a GGUF model file and returns a Runtime
 func Open(path string, opts ...Option) (Runtime, error) {
 	options := Options{
-		NumThreads:            0,     // 0 = auto-tune based on batch size
-		BatchSize:             1,
-		Verbose:               false,
-		DisableMatmulParallel: true,  // Optimized for batch workloads (34% faster)
+		NumThreads: 0,     // 0 = auto-tune based on batch size
+		BatchSize:  1,
+		Verbose:    false,
 	}
 
 	for _, opt := range opts {
@@ -129,7 +96,7 @@ func Open(path string, opts ...Option) (Runtime, error) {
 	}
 
 	// Load model
-	model, err := modelrt.LoadModel(path, options.DisableMatmulParallel)
+	model, err := modelrt.LoadModel(path)
 	if err != nil {
 		return nil, fmt.Errorf("load model: %w", err)
 	}

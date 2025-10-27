@@ -11,7 +11,7 @@ func BenchmarkTokenization(b *testing.B) {
 		b.Skip("Skipping benchmark in short mode")
 	}
 
-	model, err := LoadModel(gemmaModelPath, false)
+	model, err := LoadModel(gemmaModelPath)
 	if err != nil {
 		b.Skipf("Model not available: %v", err)
 	}
@@ -29,7 +29,7 @@ func BenchmarkForward(b *testing.B) {
 		b.Skip("Skipping benchmark in short mode")
 	}
 
-	model, err := LoadModel(gemmaModelPath, false)
+	model, err := LoadModel(gemmaModelPath)
 	if err != nil {
 		b.Skipf("Model not available: %v", err)
 	}
@@ -47,7 +47,7 @@ func BenchmarkEndToEnd(b *testing.B) {
 		b.Skip("Skipping benchmark in short mode")
 	}
 
-	model, err := LoadModel(gemmaModelPath, false)
+	model, err := LoadModel(gemmaModelPath)
 	if err != nil {
 		b.Skipf("Model not available: %v", err)
 	}

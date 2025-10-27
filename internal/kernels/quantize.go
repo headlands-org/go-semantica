@@ -282,7 +282,7 @@ func MatMulQ8_0INT8(dst []float32, weightData []byte, scales []float32, input *Q
 		dst[i] = 0
 	}
 
-	// Always use serial execution (simpler, avoids WaitGroup contention when called from parallel contexts)
+	// Use serial execution (simpler, avoids WaitGroup contention when called from parallel contexts)
 	matMulQ8_0INT8Serial(dst, weightData, scales, input, batch, inDim, outDim, blocksPerRow, bytesPerRow)
 }
 

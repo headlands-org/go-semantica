@@ -50,9 +50,6 @@ type Model struct {
 
 	// RoPE cache for fast position embeddings
 	ropeCache *kernels.RoPECache
-
-	// Configuration flags
-	disableMatmulParallel bool
 }
 
 // BufferPool manages pre-allocated buffers for inference
@@ -130,7 +127,7 @@ type Layer struct {
 }
 
 // LoadModel loads a GGUF model from file
-func LoadModel(path string, disableMatmulParallel bool) (*Model, error) {
+func LoadModel(path string) (*Model, error) {
 	reader, err := gguf.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open gguf: %w", err)
@@ -151,11 +148,10 @@ func LoadModel(path string, disableMatmulParallel bool) (*Model, error) {
 	}
 
 	model := &Model{
-		config:                config,
-		reader:                reader,
-		tokenizer:             tok,
-		layers:                make([]Layer, config.NumLayers),
-		disableMatmulParallel: disableMatmulParallel,
+		config:    config,
+		reader:    reader,
+		tokenizer: tok,
+		layers:    make([]Layer, config.NumLayers),
 	}
 
 	// Load model weights

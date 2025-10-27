@@ -12,10 +12,32 @@ Pure-Go GGUF Runtime for Embedding Models - A pure Go (no cgo) implementation fo
 # Build CLI tools
 go build ./cmd/gemma-embed
 go build ./cmd/gguf-inspect
+go build ./cmd/gemma-benchmark
 
 # Build examples
-go build ./examples/simple
-go build ./examples/embeddinggemma-demo
+go build ./examples/similarity    # Simple similarity comparison
+go build ./examples/batch          # Batch embedding generation
+```
+
+## Benchmark Commands
+
+```bash
+# Run throughput benchmark in batch mode (single model, batched embeddings)
+./gemma-benchmark -model=model/embeddinggemma-300m-Q8_0.gguf -mode=batch -duration=10
+
+# Run throughput benchmark in isolated mode (M independent model instances)
+./gemma-benchmark -model=model/embeddinggemma-300m-Q8_0.gguf -mode=isolated -duration=10 -workers=8
+
+# Run with CPU profiling
+./gemma-benchmark -model=model/embeddinggemma-300m-Q8_0.gguf -mode=batch -duration=30 -cpuprofile=cpu.prof
+
+# Run with all profiling enabled
+./gemma-benchmark -model=model/embeddinggemma-300m-Q8_0.gguf -mode=batch -duration=30 \
+  -cpuprofile=cpu.prof -blockprofile=block.prof -mutexprofile=mutex.prof
+
+# Analyze profiles
+go tool pprof cpu.prof
+go tool pprof -http=:8080 cpu.prof  # Web UI
 ```
 
 ## Test Commands
@@ -82,11 +104,11 @@ go test -bench=BenchmarkMatMul -cpuprofile=cpu.prof ./internal/kernels
    - Thread-safe batched inference with worker pools
    - Context-aware cancellation
    - Configurable via functional options pattern
-   - **Coarse-grained parallelism optimizations** (34% faster for batch workloads):
+   - **Coarse-grained parallelism optimizations**:
      - Auto-tuned worker pool sizing based on batch size
-     - Configurable matmul parallelism strategy (coarse vs fine-grained)
-     - Thread-safe buffer pooling for zero-allocation hot paths
+     - Text-level parallelism for batch workloads
      - Cache-optimized serial matmul (block size=16 for L1 locality)
+     - Zero-allocation hot paths with buffer pooling
 
 ### Data Flow
 
@@ -138,14 +160,10 @@ GGUF tensors follow these patterns:
 ### Performance Notes
 
 **Parallelization Strategy:**
-- **Batch workloads (≥8 texts)**: Coarse-grained parallelism (default)
-  - Text-level parallelism with auto-tuned worker pools
-  - Serial matmul operations for cache locality
-  - 34% faster than nested parallelism (validated via profiling)
-  - 9,600x fewer goroutines created
-- **Single-text workloads**: Fine-grained parallelism (optional)
-  - Nested parallelism: 16 matmul workers within each text
-  - Optimized for maximum single-text throughput
+- Uses coarse-grained parallelism for all workloads
+- Text-level parallelism with auto-tuned worker pools
+- Serial matmul operations for cache locality
+- Minimal goroutine overhead
 
 **SIMD & Cache Optimization:**
 - SIMD acceleration (AVX2) provides 8x speedup on dot products

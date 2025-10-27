@@ -9,7 +9,7 @@ import (
 
 // TestBufferPooling verifies that buffer pooling works correctly
 func TestBufferPooling(t *testing.T) {
-	model, err := LoadModel(gemmaModelPath, false)
+	model, err := LoadModel(gemmaModelPath)
 	if err != nil {
 		t.Skipf("Model not available: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestBufferPooling(t *testing.T) {
 // TestConcurrentBufferPooling tests thread safety with race detector
 // Run with: go test -race -tags=integration ./internal/runtime -run TestConcurrentBufferPooling
 func TestConcurrentBufferPooling(t *testing.T) {
-	model, err := LoadModel(gemmaModelPath, false)
+	model, err := LoadModel(gemmaModelPath)
 	if err != nil {
 		t.Skipf("Model not available: %v", err)
 	}

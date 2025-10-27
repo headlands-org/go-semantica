@@ -13,7 +13,7 @@ func TestINT8Accuracy(t *testing.T) {
 	}
 
 	// Load model
-	model, err := LoadModel(gemmaModelPath, false)
+	model, err := LoadModel(gemmaModelPath)
 	if err != nil {
 		t.Skipf("Model not available: %v", err)
 	}
@@ -99,7 +99,7 @@ func BenchmarkForwardINT8(b *testing.B) {
 		b.Skip("Skipping benchmark in short mode")
 	}
 
-	model, err := LoadModel(gemmaModelPath, false)
+	model, err := LoadModel(gemmaModelPath)
 	if err != nil {
 		b.Skipf("Model not available: %v", err)
 	}

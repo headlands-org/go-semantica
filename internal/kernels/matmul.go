@@ -16,7 +16,7 @@ func MatMulGGML(dst, weight, input []float32, batch, inDim, outDim int) {
 		dst[i] = 0
 	}
 
-	// Always use serial execution (simple, cache-friendly)
+	// Use serial execution (simple, cache-friendly)
 	matMulGGMLSerial(dst, weight, input, batch, inDim, outDim)
 }
 
