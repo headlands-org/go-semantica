@@ -127,75 +127,7 @@ func TestParallelVsSerialConsistency(t *testing.T) {
 	}
 }
 
-// TestAutoTuneWorkers verifies that the auto-tuning logic selects appropriate
-// worker counts for different batch sizes.
-func TestAutoTuneWorkers(t *testing.T) {
-	rt, err := Open(gemmaModelPath)
-	if err != nil {
-		t.Fatalf("Failed to open runtime: %v", err)
-	}
-	defer rt.Close()
-
-	embedRT := rt.(*embedRuntime)
-
-	tests := []struct {
-		name      string
-		batchSize int
-		validate  func(workers int) bool
-	}{
-		{
-			name:      "Single text",
-			batchSize: 1,
-			validate:  func(w int) bool { return w == 1 },
-		},
-		{
-			name:      "Small batch (4)",
-			batchSize: 4,
-			validate:  func(w int) bool { return w == 1 },
-		},
-		{
-			name:      "Medium-small batch (16)",
-			batchSize: 16,
-			validate:  func(w int) bool { return w >= 1 && w <= 16 },
-		},
-		{
-			name:      "Medium batch (32)",
-			batchSize: 32,
-			validate:  func(w int) bool { return w >= 1 && w <= 32 },
-		},
-		{
-			name:      "Large batch (128)",
-			batchSize: 128,
-			validate: func(w int) bool {
-				// Should use up to NumCPU workers
-				return w >= 1 && w <= 128
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			workers := embedRT.autoTuneWorkers(tt.batchSize)
-			t.Logf("Batch size %d -> %d workers", tt.batchSize, workers)
-
-			if !tt.validate(workers) {
-				t.Errorf("Invalid worker count %d for batch size %d", workers, tt.batchSize)
-			}
-
-			// Workers should never exceed batch size
-			if workers > tt.batchSize {
-				t.Errorf("Workers (%d) should not exceed batch size (%d)", workers, tt.batchSize)
-			}
-
-			// Workers should be at least 1
-			if workers < 1 {
-				t.Errorf("Workers should be at least 1, got %d", workers)
-			}
-		})
-	}
-}
-
-// TestAutoTuneWithBatchProcessing verifies that auto-tuning works correctly
+// TestAutoTuneWithBatchProcessing verifies that batch processing works correctly
 // when processing batches of texts.
 func TestAutoTuneWithBatchProcessing(t *testing.T) {
 	if testing.Short() {

@@ -2,117 +2,8 @@ package kernels
 
 import (
 	"math"
-	"runtime"
-	"sync"
 	"unsafe"
 )
-
-// matmulWorkerPool is a persistent worker pool for parallel matmul
-type matmulWorkerPool struct {
-	workers   int
-	workQueue chan matmulJob
-	wg        sync.WaitGroup
-}
-
-type matmulJob struct {
-	dst          []float32
-	weightData   []byte
-	scales       []float32
-	input        *QuantizedTensorINT8
-	batch        int
-	inDim        int
-	outDim       int
-	blocksPerRow int
-	bytesPerRow  int
-	j0, j1       int
-}
-
-var (
-	globalMatmulPool     *matmulWorkerPool
-	globalMatmulPoolOnce sync.Once
-)
-
-// getMatmulPool returns the singleton worker pool
-func getMatmulPool() *matmulWorkerPool {
-	globalMatmulPoolOnce.Do(func() {
-		numWorkers := runtime.GOMAXPROCS(0)
-		if numWorkers > 16 {
-			numWorkers = 16 // Cap at 16 workers
-		}
-		globalMatmulPool = &matmulWorkerPool{
-			workers:   numWorkers,
-			workQueue: make(chan matmulJob, numWorkers*2),
-		}
-		globalMatmulPool.start()
-	})
-	return globalMatmulPool
-}
-
-// start initializes the worker goroutines
-func (p *matmulWorkerPool) start() {
-	for w := 0; w < p.workers; w++ {
-		go p.worker()
-	}
-}
-
-// worker processes jobs from the work queue
-func (p *matmulWorkerPool) worker() {
-	for job := range p.workQueue {
-		p.processJob(job)
-		p.wg.Done()
-	}
-}
-
-// processJob executes a matmul job
-func (p *matmulWorkerPool) processJob(job matmulJob) {
-	if job.j0 >= job.outDim {
-		return
-	}
-
-	for i := 0; i < job.batch; i++ {
-		for j := job.j0; j < job.j1; j++ {
-			sum := float32(0)
-			weightRowOffset := j * job.bytesPerRow
-			inputScale := job.input.Scale
-
-			// Process full blocks of 32 (fast path)
-			fullBlocks := job.inDim / 32
-			for blockIdx := 0; blockIdx < fullBlocks; blockIdx++ {
-				blockOffset := weightRowOffset + blockIdx*34
-				scaleIdx := j*job.blocksPerRow + blockIdx
-				scale := job.scales[scaleIdx]
-				qsOffset := blockOffset + 2
-				blockStart := blockIdx * 32
-
-				// Direct assembly call - bypass dispatcher overhead
-				inputPtr := (*int8)(unsafe.Pointer(&job.input.Data[i*job.inDim+blockStart]))
-				weightPtr := (*int8)(unsafe.Pointer(&job.weightData[qsOffset]))
-				blockSum := dotProductINT8Asm(inputPtr, weightPtr, 32)
-
-				sum += float32(blockSum) * scale * inputScale
-			}
-
-			// Handle partial block if needed
-			if job.inDim%32 != 0 {
-				blockIdx := fullBlocks
-				blockOffset := weightRowOffset + blockIdx*34
-				scaleIdx := j*job.blocksPerRow + blockIdx
-				scale := job.scales[scaleIdx]
-				qsOffset := blockOffset + 2
-				blockStart := blockIdx * 32
-				blockSize := job.inDim - blockStart
-
-				inputSlice := job.input.Data[i*job.inDim+blockStart : i*job.inDim+blockStart+blockSize]
-				weightSlice := unsafe.Slice((*int8)(unsafe.Pointer(&job.weightData[qsOffset])), blockSize)
-				blockSum := dotProductINT8SIMD(inputSlice, weightSlice, blockSize)
-
-				sum += float32(blockSum) * scale * inputScale
-			}
-
-			job.dst[i*job.outDim+j] = sum
-		}
-	}
-}
 
 // QuantizedTensorINT8 represents a symmetric INT8-quantized tensor
 // Values are quantized as: q = round(x / scale)
@@ -316,13 +207,8 @@ func MatMulQ8_0INT8Fast(dst []float32, weight *Q8_0Tensor, input *QuantizedTenso
 		dst[i] = 0
 	}
 
-	// Use parallel execution for large matrices
-	const parallelThreshold = 256
-	if outDim >= parallelThreshold {
-		matMulQ8_0INT8FastParallel(dst, weight, input, batch, inDim, outDim)
-	} else {
-		matMulQ8_0INT8FastSerial(dst, weight, input, batch, inDim, outDim)
-	}
+	// Always use serial execution (simpler, avoids WaitGroup contention)
+	matMulQ8_0INT8FastSerial(dst, weight, input, batch, inDim, outDim)
 }
 
 // matMulQ8_0INT8FastSerial is the serial implementation
@@ -361,61 +247,6 @@ func matMulQ8_0INT8FastSerial(dst []float32, weight *Q8_0Tensor, input *Quantize
 	}
 }
 
-// matMulQ8_0INT8FastParallel is the parallel implementation
-func matMulQ8_0INT8FastParallel(dst []float32, weight *Q8_0Tensor, input *QuantizedTensorINT8, batch, inDim, outDim int) {
-	const numWorkers = 16
-	chunkSize := (outDim + numWorkers - 1) / numWorkers
-	blocksPerRow := (inDim + 31) / 32
-
-	var wg sync.WaitGroup
-	wg.Add(numWorkers)
-
-	for w := 0; w < numWorkers; w++ {
-		j0 := w * chunkSize
-		j1 := j0 + chunkSize
-		if j1 > outDim {
-			j1 = outDim
-		}
-
-		go func(j0, j1 int) {
-			defer wg.Done()
-
-			if j0 >= outDim {
-				return
-			}
-
-			for i := 0; i < batch; i++ {
-				for j := j0; j < j1; j++ {
-					sum := float32(0)
-
-					for blockIdx := 0; blockIdx < blocksPerRow; blockIdx++ {
-						scaleIdx := j*blocksPerRow + blockIdx
-						scale := weight.Scales[scaleIdx]
-
-						blockStart := blockIdx * 32
-						blockEnd := blockStart + 32
-						if blockEnd > inDim {
-							blockEnd = inDim
-						}
-						blockSize := blockEnd - blockStart
-
-						// SIMD dot product
-						inputSlice := input.Data[i*inDim+blockStart : i*inDim+blockStart+blockSize]
-						weightSlice := weight.Qs[j*inDim+blockStart : j*inDim+blockStart+blockSize]
-						blockSum := dotProductINT8SIMD(inputSlice, weightSlice, blockSize)
-
-						sum += float32(blockSum) * scale * input.Scale
-					}
-
-					dst[i*outDim+j] = sum
-				}
-			}
-		}(j0, j1)
-	}
-
-	wg.Wait()
-}
-
 // MatMulQ8_0INT8 performs matrix multiplication with Q8_0 weights and INT8 activations
 // This preserves per-block quantization from Q8_0 for better accuracy
 //
@@ -451,13 +282,8 @@ func MatMulQ8_0INT8(dst []float32, weightData []byte, scales []float32, input *Q
 		dst[i] = 0
 	}
 
-	// Use parallel execution for large matrices (same threshold as FP32)
-	const parallelThreshold = 256
-	if outDim >= parallelThreshold {
-		matMulQ8_0INT8Parallel(dst, weightData, scales, input, batch, inDim, outDim, blocksPerRow, bytesPerRow)
-	} else {
-		matMulQ8_0INT8Serial(dst, weightData, scales, input, batch, inDim, outDim, blocksPerRow, bytesPerRow)
-	}
+	// Always use serial execution (simpler, avoids WaitGroup contention when called from parallel contexts)
+	matMulQ8_0INT8Serial(dst, weightData, scales, input, batch, inDim, outDim, blocksPerRow, bytesPerRow)
 }
 
 // matMulQ8_0INT8Serial is the serial implementation
@@ -510,38 +336,5 @@ func matMulQ8_0INT8Serial(dst []float32, weightData []byte, scales []float32, in
 			dst[i*outDim+j] = sum
 		}
 	}
-}
-
-// matMulQ8_0INT8Parallel is the parallel implementation using persistent worker pool
-func matMulQ8_0INT8Parallel(dst []float32, weightData []byte, scales []float32, input *QuantizedTensorINT8, batch, inDim, outDim, blocksPerRow, bytesPerRow int) {
-	pool := getMatmulPool()
-	numWorkers := pool.workers
-	chunkSize := (outDim + numWorkers - 1) / numWorkers
-
-	pool.wg.Add(numWorkers)
-
-	for w := 0; w < numWorkers; w++ {
-		j0 := w * chunkSize
-		j1 := j0 + chunkSize
-		if j1 > outDim {
-			j1 = outDim
-		}
-
-		pool.workQueue <- matmulJob{
-			dst:          dst,
-			weightData:   weightData,
-			scales:       scales,
-			input:        input,
-			batch:        batch,
-			inDim:        inDim,
-			outDim:       outDim,
-			blocksPerRow: blocksPerRow,
-			bytesPerRow:  bytesPerRow,
-			j0:           j0,
-			j1:           j1,
-		}
-	}
-
-	pool.wg.Wait()
 }
 
