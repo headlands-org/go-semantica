@@ -4,6 +4,7 @@ package runtime
 import (
 	"fmt"
 	"math"
+	"sync"
 
 	"github.com/lth/pure-go-llamas/internal/gguf"
 	"github.com/lth/pure-go-llamas/internal/kernels"
@@ -50,12 +51,13 @@ type Model struct {
 	// RoPE cache for fast position embeddings
 	ropeCache *kernels.RoPECache
 
-	workspace modelWorkspace
+	workspacePool *sync.Pool
 }
 
 type modelWorkspace struct {
 	hidden   []float32
 	residual []float32
+	hiddenINT8 kernels.QuantizedTensorINT8
 
 	attention attentionWorkspace
 	mlp       mlpWorkspace
@@ -70,11 +72,13 @@ type attentionWorkspace struct {
 	attnOut   []float32
 	scratch   []float32
 	positions []int
+	attnOutINT8 kernels.QuantizedTensorINT8
 }
 
 type mlpWorkspace struct {
 	gate []float32
 	up   []float32
+	gateINT8 kernels.QuantizedTensorINT8
 }
 
 // Layer represents a transformer encoder layer
@@ -147,8 +151,9 @@ func LoadModel(path string) (*Model, error) {
 		model.layersINT8[i] = layer
 	}
 
-	// Buffer allocation now happens directly in Forward() - no pooling
-	// This eliminates sync.Pool contention when multiple goroutines call Forward() concurrently
+	model.workspacePool = &sync.Pool{
+		New: func() interface{} { return &modelWorkspace{} },
+	}
 
 	return model, nil
 }

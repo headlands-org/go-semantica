@@ -25,15 +25,12 @@ type Q8_0Tensor struct {
 	Cols   int
 }
 
-// QuantizeSymmetricINT8 quantizes FP32 tensor to INT8 using symmetric quantization
-// scale = max(abs(x)) / 127.0
-// This preserves zero exactly (0.0 -> 0)
-func QuantizeSymmetricINT8(x []float32, rows, cols int) QuantizedTensorINT8 {
+// QuantizeSymmetricINT8Into quantizes the given tensor into a reusable destination buffer.
+func QuantizeSymmetricINT8Into(dst *QuantizedTensorINT8, x []float32, rows, cols int) {
 	if len(x) != rows*cols {
-		panic("QuantizeSymmetricINT8: size mismatch")
+		panic("QuantizeSymmetricINT8Into: size mismatch")
 	}
 
-	// Find absolute maximum for scaling
 	absMax := float32(0)
 	for _, v := range x {
 		if abs := math.Abs(float64(v)); float32(abs) > absMax {
@@ -41,39 +38,49 @@ func QuantizeSymmetricINT8(x []float32, rows, cols int) QuantizedTensorINT8 {
 		}
 	}
 
-	// Avoid division by zero
 	if absMax == 0 {
-		return QuantizedTensorINT8{
-			Data:  make([]int8, len(x)),
-			Scale: 1.0,
-			Rows:  rows,
-			Cols:  cols,
+		if cap(dst.Data) < len(x) {
+			dst.Data = make([]int8, len(x))
 		}
+		dst.Data = dst.Data[:len(x)]
+		for i := range dst.Data {
+			dst.Data[i] = 0
+		}
+		dst.Scale = 1.0
+		dst.Rows = rows
+		dst.Cols = cols
+		return
 	}
 
-	// Scale factor to map [-absMax, absMax] to [-127, 127]
 	scale := absMax / 127.0
+	if cap(dst.Data) < len(x) {
+		dst.Data = make([]int8, len(x))
+	}
+	data := dst.Data[:len(x)]
 
-	// Quantize
-	data := make([]int8, len(x))
 	for i, v := range x {
-		// Round to nearest integer
-		quantized := math.Round(float64(v / scale))
-		// Clamp to INT8 range
-		if quantized > 127 {
-			quantized = 127
-		} else if quantized < -127 {
-			quantized = -127
+		q := math.Round(float64(v / scale))
+		if q > 127 {
+			q = 127
+		} else if q < -127 {
+			q = -127
 		}
-		data[i] = int8(quantized)
+		data[i] = int8(q)
 	}
 
-	return QuantizedTensorINT8{
-		Data:  data,
-		Scale: scale,
-		Rows:  rows,
-		Cols:  cols,
-	}
+	dst.Data = data
+	dst.Scale = scale
+	dst.Rows = rows
+	dst.Cols = cols
+}
+
+// QuantizeSymmetricINT8 quantizes FP32 tensor to INT8 using symmetric quantization
+// scale = max(abs(x)) / 127.0
+// This preserves zero exactly (0.0 -> 0)
+func QuantizeSymmetricINT8(x []float32, rows, cols int) QuantizedTensorINT8 {
+	var dst QuantizedTensorINT8
+	QuantizeSymmetricINT8Into(&dst, x, rows, cols)
+	return dst
 }
 
 // Dequantize converts INT8 back to FP32
@@ -178,6 +185,57 @@ func MatMulINT8GGML(dst []float32, weight, input *QuantizedTensorINT8, batch, in
 
 					dst[i*outDim+j] = float32(sum) * combinedScale
 		}
+	}
+}
+
+// ParseQ8_0Tensor converts raw Q8_0 bytes into a tensor with pre-parsed scales and values.
+func ParseQ8_0Tensor(data []byte, rows, cols int) *Q8_0Tensor {
+	if rows <= 0 || cols <= 0 {
+		panic("ParseQ8_0Tensor: invalid shape")
+	}
+
+	blocksPerRow := (cols + 31) / 32
+	expectedBytes := rows * blocksPerRow * 34
+	if len(data) < expectedBytes {
+		panic("ParseQ8_0Tensor: data too small")
+	}
+
+	qs := make([]int8, rows*cols)
+	scales := make([]float32, rows*blocksPerRow)
+
+	for r := 0; r < rows; r++ {
+		rowOffset := r * blocksPerRow * 34
+		qsBase := r * cols
+		scaleBase := r * blocksPerRow
+
+		for b := 0; b < blocksPerRow; b++ {
+			blockOffset := rowOffset + b*34
+			scaleBytes := uint16(data[blockOffset]) | uint16(data[blockOffset+1])<<8
+			scales[scaleBase+b] = float16ToFloat32(scaleBytes)
+
+			blockStart := b * 32
+			remaining := cols - blockStart
+			if remaining <= 0 {
+				continue
+			}
+			blockSize := 32
+			if remaining < 32 {
+				blockSize = remaining
+			}
+
+			qBytes := data[blockOffset+2 : blockOffset+2+blockSize]
+			qsRow := qs[qsBase+blockStart : qsBase+blockStart+blockSize]
+			for i := 0; i < blockSize; i++ {
+				qsRow[i] = int8(qBytes[i])
+			}
+		}
+	}
+
+	return &Q8_0Tensor{
+		Qs:     qs,
+		Scales: scales,
+		Rows:   rows,
+		Cols:   cols,
 	}
 }
 
@@ -339,4 +397,3 @@ func matMulQ8_0INT8Serial(dst []float32, weightData []byte, scales []float32, in
 		}
 	}
 }
-

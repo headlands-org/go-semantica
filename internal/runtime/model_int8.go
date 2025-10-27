@@ -149,9 +149,12 @@ func (m *Model) ForwardINT8(tokenIDs []int) ([]float32, error) {
 
 	embDim := m.config.EmbedDim
 
+	ws := m.workspacePool.Get().(*modelWorkspace)
+	defer m.workspacePool.Put(ws)
+
 	// Reuse persistent work buffers to avoid per-call allocation churn
-	hidden := ensureFloat32(&m.workspace.hidden, seqLen*embDim)
-	residual := ensureFloat32(&m.workspace.residual, seqLen*embDim)
+	hidden := ensureFloat32(&ws.hidden, seqLen*embDim)
+	residual := ensureFloat32(&ws.residual, seqLen*embDim)
 
 	// Embed tokens (on-the-fly Q8_0 dequantization for zero-copy)
 	bytesPerRow := ((embDim + 31) / 32) * 34 // Q8_0: (numBlocks * 34 bytes)
@@ -192,10 +195,10 @@ func (m *Model) ForwardINT8(tokenIDs []int) ([]float32, error) {
 		}
 
 		// Quantize hidden state to INT8
-		hiddenINT8 := kernels.QuantizeSymmetricINT8(hidden, seqLen, embDim)
+		kernels.QuantizeSymmetricINT8Into(&ws.hiddenINT8, hidden, seqLen, embDim)
 
 		// Run attention with INT8
-		m.runAttentionINT8(hidden, &hiddenINT8, layer, seqLen)
+		m.runAttentionINT8(ws, hidden, &ws.hiddenINT8, layer, seqLen)
 
 		// Post-attention norm if present
 		if len(layer.attnPostNormWeight) > 0 {
@@ -230,10 +233,10 @@ func (m *Model) ForwardINT8(tokenIDs []int) ([]float32, error) {
 		}
 
 		// Quantize for MLP
-		hiddenINT8 = kernels.QuantizeSymmetricINT8(hidden, seqLen, embDim)
+		kernels.QuantizeSymmetricINT8Into(&ws.hiddenINT8, hidden, seqLen, embDim)
 
 		// Run MLP with INT8
-		m.runMLPINT8(hidden, &hiddenINT8, layer, seqLen)
+		m.runMLPINT8(ws, hidden, &ws.hiddenINT8, layer, seqLen)
 
 		// Post-FFN norm if present
 		if len(layer.ffnPostNormWeight) > 0 {
@@ -278,14 +281,14 @@ func (m *Model) ForwardINT8(tokenIDs []int) ([]float32, error) {
 }
 
 // runAttentionINT8 runs attention with INT8 activations
-func (m *Model) runAttentionINT8(output []float32, hiddenINT8 *kernels.QuantizedTensorINT8, layer *LayerINT8, seqLen int) {
+func (m *Model) runAttentionINT8(ws *modelWorkspace, output []float32, hiddenINT8 *kernels.QuantizedTensorINT8, layer *LayerINT8, seqLen int) {
 	embDim := m.config.EmbedDim
 	nHeads := m.config.NumHeads
 	nKVHeads := m.config.NumKVHeads
 	headDim := m.config.HeadDim
 	kvDim := nKVHeads * headDim
 
-	attn := &m.workspace.attention
+	attn := &ws.attention
 
 	// Reuse buffers for Q, K, V projections
 	q := ensureFloat32(&attn.q, seqLen*embDim)
@@ -359,19 +362,19 @@ func (m *Model) runAttentionINT8(output []float32, hiddenINT8 *kernels.Quantized
 	kernels.MultiHeadAttentionWithScale(attnOut, q, kExpanded, vExpanded, 1, seqLen, nHeads, headDim, nil, m.config.AttentionScale, attnScratch)
 
 	// Quantize attention output
-	attnOutINT8 := kernels.QuantizeSymmetricINT8(attnOut, seqLen, embDim)
+	kernels.QuantizeSymmetricINT8Into(&attn.attnOutINT8, attnOut, seqLen, embDim)
 
 	// Project output with INT8 (raw bytes, zero-copy)
-	kernels.MatMulQ8_0INT8(output, layer.oWeightQ8, layer.oWeightScales, &attnOutINT8, seqLen, embDim, embDim)
+	kernels.MatMulQ8_0INT8(output, layer.oWeightQ8, layer.oWeightScales, &attn.attnOutINT8, seqLen, embDim, embDim)
 }
 
 // runMLPINT8 runs MLP with INT8 activations
-func (m *Model) runMLPINT8(output []float32, hiddenINT8 *kernels.QuantizedTensorINT8, layer *LayerINT8, seqLen int) {
+func (m *Model) runMLPINT8(ws *modelWorkspace, output []float32, hiddenINT8 *kernels.QuantizedTensorINT8, layer *LayerINT8, seqLen int) {
 	embDim := m.config.EmbedDim
 	intermDim := m.config.IntermDim
 
 	// Reuse buffers for gate and up projections
-	mlp := &m.workspace.mlp
+	mlp := &ws.mlp
 	gate := ensureFloat32(&mlp.gate, seqLen*intermDim)
 	up := ensureFloat32(&mlp.up, seqLen*intermDim)
 
@@ -386,10 +389,10 @@ func (m *Model) runMLPINT8(output []float32, hiddenINT8 *kernels.QuantizedTensor
 	kernels.VecMulF32(gate, gate, up, seqLen*intermDim)
 
 	// Quantize for down projection
-	gateINT8 := kernels.QuantizeSymmetricINT8(gate, seqLen, intermDim)
+	kernels.QuantizeSymmetricINT8Into(&mlp.gateINT8, gate, seqLen, intermDim)
 
 	// Down projection with INT8 (raw bytes, zero-copy)
-	kernels.MatMulQ8_0INT8(output, layer.downWeightQ8, layer.downWeightScales, &gateINT8, seqLen, intermDim, embDim)
+	kernels.MatMulQ8_0INT8(output, layer.downWeightQ8, layer.downWeightScales, &mlp.gateINT8, seqLen, intermDim, embDim)
 }
 
 // extractQ8_0Scales extracts float32 scales from raw Q8_0 quantized data
