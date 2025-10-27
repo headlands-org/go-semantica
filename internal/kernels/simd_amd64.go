@@ -31,13 +31,6 @@ func dotProductINT8VNNI(a, b *int8, n int) int32
 //go:noescape
 func dotProductINT8Asm(a, b *int8, n int) int32
 
-// matmulInnerLoopAsm processes one output element with vectorized accumulation
-// This is the fully-optimized assembly inner loop that keeps accumulators in registers
-// Returns the sum of (dotProduct(input[i*32:(i+1)*32], weight[i]) * scales[i]) for all blocks
-//
-//go:noescape
-func matmulInnerLoopAsm(inputRow *int8, weightData *byte, scales *float32, numBlocks int) float32
-
 // dotProductSIMD is the SIMD-accelerated version with runtime feature detection
 func dotProductSIMD(a, b []float32, n int) float32 {
 	if n == 0 {

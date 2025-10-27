@@ -304,18 +304,75 @@ func matMulQ8_0INT8Serial(dst []float32, weightData []byte, scales []float32, in
 		inputOffset := i * inDim
 
 		for j := 0; j < outDim; j++ {
+			sum := float32(0)
+
 			// Weight row j starts at offset j * bytesPerRow
 			weightRowOffset := j * bytesPerRow
 			scaleBaseIdx := j * blocksPerRow
 
-			// Use fully-optimized assembly inner loop for full blocks
-			// This keeps all accumulators in YMM registers with vectorized FMA
-			sum := float32(0)
-			if fullBlocks > 0 {
-				inputPtr := (*int8)(unsafe.Pointer(&input.Data[inputOffset]))
-				weightPtr := (*byte)(unsafe.Pointer(&weightData[weightRowOffset]))
-				scalesPtr := (*float32)(unsafe.Pointer(&scales[scaleBaseIdx]))
-				sum = matmulInnerLoopAsm(inputPtr, weightPtr, scalesPtr, fullBlocks)
+			// Process full blocks of 32 with 4-way unrolling for better ILP
+			// OPTIMIZATION: Hoist inputScale multiplication outside block loop
+			blockIdx := 0
+			sum0, sum1, sum2, sum3 := float32(0), float32(0), float32(0), float32(0)
+
+			// Main loop: process 4 blocks at a time
+			for ; blockIdx+3 < fullBlocks; blockIdx += 4 {
+				// Block 0
+				blockOffset0 := weightRowOffset + blockIdx*34
+				scale0 := scales[scaleBaseIdx+blockIdx]
+				qsOffset0 := blockOffset0 + 2
+				blockStart0 := blockIdx * 32
+				inputPtr0 := (*int8)(unsafe.Pointer(&input.Data[inputOffset+blockStart0]))
+				weightPtr0 := (*int8)(unsafe.Pointer(&weightData[qsOffset0]))
+				blockSum0 := dotProductINT8Asm(inputPtr0, weightPtr0, 32)
+				sum0 += float32(blockSum0) * scale0
+
+				// Block 1
+				blockOffset1 := weightRowOffset + (blockIdx+1)*34
+				scale1 := scales[scaleBaseIdx+blockIdx+1]
+				qsOffset1 := blockOffset1 + 2
+				blockStart1 := (blockIdx+1) * 32
+				inputPtr1 := (*int8)(unsafe.Pointer(&input.Data[inputOffset+blockStart1]))
+				weightPtr1 := (*int8)(unsafe.Pointer(&weightData[qsOffset1]))
+				blockSum1 := dotProductINT8Asm(inputPtr1, weightPtr1, 32)
+				sum1 += float32(blockSum1) * scale1
+
+				// Block 2
+				blockOffset2 := weightRowOffset + (blockIdx+2)*34
+				scale2 := scales[scaleBaseIdx+blockIdx+2]
+				qsOffset2 := blockOffset2 + 2
+				blockStart2 := (blockIdx+2) * 32
+				inputPtr2 := (*int8)(unsafe.Pointer(&input.Data[inputOffset+blockStart2]))
+				weightPtr2 := (*int8)(unsafe.Pointer(&weightData[qsOffset2]))
+				blockSum2 := dotProductINT8Asm(inputPtr2, weightPtr2, 32)
+				sum2 += float32(blockSum2) * scale2
+
+				// Block 3
+				blockOffset3 := weightRowOffset + (blockIdx+3)*34
+				scale3 := scales[scaleBaseIdx+blockIdx+3]
+				qsOffset3 := blockOffset3 + 2
+				blockStart3 := (blockIdx+3) * 32
+				inputPtr3 := (*int8)(unsafe.Pointer(&input.Data[inputOffset+blockStart3]))
+				weightPtr3 := (*int8)(unsafe.Pointer(&weightData[qsOffset3]))
+				blockSum3 := dotProductINT8Asm(inputPtr3, weightPtr3, 32)
+				sum3 += float32(blockSum3) * scale3
+			}
+
+			// Combine partial sums
+			sum += sum0 + sum1 + sum2 + sum3
+
+			// Handle remaining full blocks (< 4 left)
+			for ; blockIdx < fullBlocks; blockIdx++ {
+				blockOffset := weightRowOffset + blockIdx*34
+				scale := scales[scaleBaseIdx+blockIdx]
+				qsOffset := blockOffset + 2
+				blockStart := blockIdx * 32
+
+				inputPtr := (*int8)(unsafe.Pointer(&input.Data[inputOffset+blockStart]))
+				weightPtr := (*int8)(unsafe.Pointer(&weightData[qsOffset]))
+				blockSum := dotProductINT8Asm(inputPtr, weightPtr, 32)
+
+				sum += float32(blockSum) * scale
 			}
 
 			// Handle partial block if needed
@@ -334,7 +391,7 @@ func matMulQ8_0INT8Serial(dst []float32, weightData []byte, scales []float32, in
 				sum += float32(blockSum) * scale
 			}
 
-			// Apply inputScale once at the end
+			// Apply inputScale once at the end instead of per-block
 			dst[i*outDim+j] = sum * inputScale
 		}
 	}
