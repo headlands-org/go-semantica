@@ -1,6 +1,7 @@
 package kernels
 
 import (
+	"math"
 	"unsafe"
 )
 
@@ -30,15 +31,25 @@ func QuantizeSymmetricINT8Into(dst *QuantizedTensorINT8, x []float32, rows, cols
 		panic("QuantizeSymmetricINT8Into: size mismatch")
 	}
 
-	absMax := findAbsMax(x)
+	n := len(x)
+	if n == 0 {
+		dst.Data = dst.Data[:0]
+		dst.Scale = 1.0
+		dst.Rows = rows
+		dst.Cols = cols
+		return
+	}
 
-	if absMax == 0 {
-		if cap(dst.Data) < len(x) {
-			dst.Data = make([]int8, len(x))
-		}
-		dst.Data = dst.Data[:len(x)]
-		for i := range dst.Data {
-			dst.Data[i] = 0
+	if cap(dst.Data) < n {
+		dst.Data = make([]int8, n)
+	}
+	data := dst.Data[:n]
+
+	maxVal := absMaxScalar(x)
+
+	if maxVal == 0 {
+		for i := range data {
+			data[i] = 0
 		}
 		dst.Scale = 1.0
 		dst.Rows = rows
@@ -46,51 +57,10 @@ func QuantizeSymmetricINT8Into(dst *QuantizedTensorINT8, x []float32, rows, cols
 		return
 	}
 
-	scale := absMax / 127.0
-	invScale := float32(0)
-	if scale != 0 {
-		invScale = 1.0 / scale
-	}
-	if cap(dst.Data) < len(x) {
-		dst.Data = make([]int8, len(x))
-	}
-	data := dst.Data[:len(x)]
+	scale := maxVal / 127.0
+	invScale := float32(1.0) / scale
 
-	i := 0
-	n := len(x)
-	for ; i+8 <= n; i += 8 {
-		for j := 0; j < 8; j++ {
-			v := x[i+j]
-			scaled := v * invScale
-			var q int32
-			if scaled >= 0 {
-				q = int32(scaled + 0.5)
-			} else {
-				q = int32(scaled - 0.5)
-			}
-			if q > 127 {
-				q = 127
-			} else if q < -127 {
-				q = -127
-			}
-			data[i+j] = int8(q)
-		}
-	}
-	for ; i < n; i++ {
-		scaled := x[i] * invScale
-		var q int32
-		if scaled >= 0 {
-			q = int32(scaled + 0.5)
-		} else {
-			q = int32(scaled - 0.5)
-		}
-		if q > 127 {
-			q = 127
-		} else if q < -127 {
-			q = -127
-		}
-		data[i] = int8(q)
-	}
+	quantizeInto(data, x, invScale)
 
 	dst.Data = data
 	dst.Scale = scale
@@ -107,69 +77,29 @@ func QuantizeSymmetricINT8(x []float32, rows, cols int) QuantizedTensorINT8 {
 	return dst
 }
 
-func findAbsMax(x []float32) float32 {
-	if len(x) == 0 {
-		return 0
+func absMaxScalar(x []float32) float32 {
+	maxVal := float32(0)
+	for _, v := range x {
+		bits := math.Float32bits(v) & 0x7fffffff
+		abs := math.Float32frombits(bits)
+		if abs > maxVal {
+			maxVal = abs
+		}
 	}
+	return maxVal
+}
 
-	max0 := float32(0)
-	max1 := float32(0)
-	max2 := float32(0)
-	max3 := float32(0)
-
-	i := 0
-	n := len(x)
-	for ; i+4 <= n; i += 4 {
-		v0 := x[i+0]
-		if v0 < 0 {
-			v0 = -v0
+func quantizeInto(dst []int8, src []float32, invScale float32) {
+	for i, v := range src {
+		scaled := float64(v) * float64(invScale)
+		q := int32(math.Round(scaled))
+		if q > 127 {
+			q = 127
+		} else if q < -127 {
+			q = -127
 		}
-		if v0 > max0 {
-			max0 = v0
-		}
-		v1 := x[i+1]
-		if v1 < 0 {
-			v1 = -v1
-		}
-		if v1 > max1 {
-			max1 = v1
-		}
-		v2 := x[i+2]
-		if v2 < 0 {
-			v2 = -v2
-		}
-		if v2 > max2 {
-			max2 = v2
-		}
-		v3 := x[i+3]
-		if v3 < 0 {
-			v3 = -v3
-		}
-		if v3 > max3 {
-			max3 = v3
-		}
+		dst[i] = int8(q)
 	}
-
-	for ; i < n; i++ {
-		v := x[i]
-		if v < 0 {
-			v = -v
-		}
-		if v > max0 {
-			max0 = v
-		}
-	}
-
-	if max1 > max0 {
-		max0 = max1
-	}
-	if max2 > max0 {
-		max0 = max2
-	}
-	if max3 > max0 {
-		max0 = max3
-	}
-	return max0
 }
 
 // Dequantize converts INT8 back to FP32
