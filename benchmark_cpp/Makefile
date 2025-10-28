@@ -53,7 +53,15 @@ ifeq ($(wildcard $(LLAMA_INCLUDE)/llama.h),)
 endif
 
 # Auto-detect library: prefer shared library, fallback to static
-LLAMA_SHARED := $(wildcard $(LLAMA_DIR)/build/bin/libllama.so $(LLAMA_DIR)/libllama.so $(LLAMA_DIR)/build/libllama.so $(LLAMA_DIR)/lib/libllama.so)
+LLAMA_SHARED := $(wildcard \
+    $(LLAMA_DIR)/build/bin/libllama.so \
+    $(LLAMA_DIR)/libllama.so \
+    $(LLAMA_DIR)/build/libllama.so \
+    $(LLAMA_DIR)/lib/libllama.so \
+    $(LLAMA_DIR)/build/bin/libllama.dylib \
+    $(LLAMA_DIR)/libllama.dylib \
+    $(LLAMA_DIR)/build/libllama.dylib \
+    $(LLAMA_DIR)/lib/libllama.dylib)
 LLAMA_STATIC := $(wildcard $(LLAMA_DIR)/build/bin/libllama.a $(LLAMA_DIR)/libllama.a $(LLAMA_DIR)/build/libllama.a $(LLAMA_DIR)/lib/libllama.a)
 
 ifdef LLAMA_SHARED

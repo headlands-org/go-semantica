@@ -34,21 +34,35 @@ rt, _ := model.Open() // loads the embedded Gemma weights straight from memory
 ```
 
 ## Performance vs. llama.cpp
-Benchmarks below were run on an AMD Ryzen 9 7900 with `embeddinggemma-300m-Q8_0.gguf`. llama.cpp numbers were captured with the reference C++ benchmark in `benchmark_cpp/`.
+
+### Linux (Ryzen 9 7900, x86_64)
+Benchmarks collected on Ubuntu with `embeddinggemma-300m-Q8_0.gguf`. llama.cpp numbers come from the C++ benchmark in `benchmark_cpp/` compiled against the CPU backend.
 
 | Scenario | Metric | pure-go-llamas | llama.cpp | Notes |
 |----------|--------|----------------|-----------|-------|
-| Idle | Memory usage | 54 MB heap | ~358 MB RSS | Go runtime is more memory-efficient at rest.
-| Single short doc (9w) | P50 latency | 49.8 ms | 8.5 ms | ~6× slower; single-document latency remains the main gap.
-| Single long doc (49w) | P50 latency | 276.1 ms | 27.6 ms | ~10× slower for long requests.
+| Idle | Memory usage | 54 MB heap | ~358 MB RSS | ~0.15× memory; pure Go keeps resident set smaller.
+| Single short doc (9w) | P50 latency | 49.8 ms | 8.5 ms | ~6× slower.
+| Single long doc (49w) | P50 latency | 276.1 ms | 27.6 ms | ~10× slower.
 | Batch 96× short docs | Throughput | 219.8 emb/s | 252.2 emb/s | ~87% of llama.cpp throughput.
-| Batch 96× long docs | Throughput | 33.0 emb/s | 31.5 emb/s | Slightly faster in this specific workload.
+| Batch 96× long docs | Throughput | 33.0 emb/s | 31.5 emb/s | Slightly faster (1.05×).
 
-Interpretation: single-request latency is significantly slower than llama.cpp today, but batch throughput is close, and memory usage is lower in both idle and batch scenarios.
+### macOS (M1 Pro, Metal vs. CPU)
+Benchmarks collected on macOS 14 with an Apple M1 Pro. llama.cpp was built via Homebrew and uses the Metal backend; the Go runtime is CPU-only.
+
+| Scenario | Metric | pure-go-llamas | llama.cpp | Notes |
+|----------|--------|----------------|-----------|-------|
+| Idle | Memory usage | 54 MB heap | 393 MB RSS | ~0.14× memory consumption.
+| Single short doc (9w) | P50 latency | 96.4 ms | 9.5 ms | ~10× slower; Metal acceleration dominates.
+| Single long doc (49w) | P50 latency | 513.2 ms | 11.4 ms | ~45× slower; Metal handles long contexts far faster.
+| Batch 96× short docs | Throughput | 79.4 emb/s | 1154.9 emb/s | ~7% of llama.cpp throughput; peak memory 104 MB vs 455 MB.
+| Batch 96× long docs | Throughput | 12.0 emb/s | 177.8 emb/s | ~7% of llama.cpp throughput; peak memory 152 MB vs 888 MB.
+
+Interpretation: on x86_64 CPUs, batch throughput is close to llama.cpp while single-document latency still lags. On Apple Silicon, llama.cpp’s Metal backend is substantially faster than the pure CPU Go path, though Go continues to use less memory in every scenario.
 
 ## Status and Limitations
 - Only embedding models are supported; text generation is out of scope.
 - AVX2 kernels are provided; other SIMD ISAs are not yet implemented.
+- GPU/Metal acceleration is unavailable; all execution is CPU-bound even on Apple Silicon.
 - Correctness is validated against llama.cpp (cosine similarity ≈ 0.988). Expect small numerical drift when comparing embeddings bit-for-bit.
 - The embedded Gemma model inflates binary size by ~300 MB; use it only when the trade-off is acceptable.
 
