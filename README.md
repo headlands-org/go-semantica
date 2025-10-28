@@ -41,10 +41,10 @@ Benchmarks collected on Ubuntu with `embeddinggemma-300m-Q8_0.gguf`. llama.cpp n
 | Scenario | Metric | pure-go-llamas | llama.cpp | Notes |
 |----------|--------|----------------|-----------|-------|
 | Idle | Memory usage | 54 MB heap | ~358 MB RSS | ~0.15× memory; pure Go keeps resident set smaller.
-| Single short doc (9w) | P50 latency | 49.8 ms | 8.5 ms | ~6× slower.
-| Single long doc (49w) | P50 latency | 276.1 ms | 27.6 ms | ~10× slower.
-| Batch 96× short docs | Throughput | 219.8 emb/s | 252.2 emb/s | ~87% of llama.cpp throughput.
-| Batch 96× long docs | Throughput | 33.0 emb/s | 31.5 emb/s | Slightly faster (1.05×).
+| Single short doc (9w) | P50 latency | 38.6 ms | 8.5 ms | ~4.5× slower.
+| Single long doc (49w) | P50 latency | 194.7 ms | 27.6 ms | ~7× slower.
+| Batch 96× short docs | Throughput | 300.1 emb/s | 252.2 emb/s | ~1.19× llama.cpp throughput.
+| Batch 96× long docs | Throughput | 49.8 emb/s | 31.5 emb/s | ~1.6× llama.cpp throughput.
 
 ### macOS (M1 Pro, darwin/arm64)
 Benchmarks collected on macOS 14 with an Apple M1 Pro.
