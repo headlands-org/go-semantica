@@ -86,6 +86,11 @@ func MultiHeadAttentionWithScale(
 			// Offset within slices that corresponds to the current head.
 			headOffset := batchBase + h*headDim
 
+			var scaledBuf []float32
+			if hasAVX2 && headDim >= 8 {
+				scaledBuf = make([]float32, headDim)
+			}
+
 			// Compute attention scores: scores[i,j] = Q[i] · K[j]
 			for i := 0; i < seqLen; i++ {
 				qOffset := headOffset + i*headStride
@@ -97,7 +102,15 @@ func MultiHeadAttentionWithScale(
 				for j := 0; j < seqLen; j++ {
 					kRow := K[kOffset : kOffset+headDim]
 
-					score := dotProductInline(qRow, kRow) * scale
+					// Prefer SIMD dot product when available; otherwise fall back to the
+					// unrolled inline helper to keep indices simple.
+					var score float32
+					if hasAVX2 && headDim >= 8 {
+						score = dotProductSIMD(qRow, kRow, headDim)
+					} else {
+						score = dotProductInline(qRow, kRow)
+					}
+					score *= scale
 
 					// Apply mask if provided
 					if mask != nil {
@@ -134,7 +147,7 @@ func MultiHeadAttentionWithScale(
 					}
 
 					vRow := V[vOffset : vOffset+headDim]
-					axpy(outRow, vRow, weight)
+					axpyAccum(outRow, vRow, weight, scaledBuf)
 					vOffset += headStride
 				}
 			}
@@ -173,27 +186,24 @@ func dotProductInline(a, b []float32) float32 {
 	return ((sum0 + sum1) + (sum2 + sum3))
 }
 
-// axpy performs out += weight * vec with loop unrolling for better throughput.
-func axpy(out, vec []float32, weight float32) {
+// axpyAccum performs out += weight * vec, using SIMD helpers when available.
+func axpyAccum(out, vec []float32, weight float32, scaled []float32) {
 	if weight == 0 {
 		return
 	}
 
 	n := len(out)
-	i := 0
-
-	for ; i+8 <= n; i += 8 {
-		out[i+0] += weight * vec[i+0]
-		out[i+1] += weight * vec[i+1]
-		out[i+2] += weight * vec[i+2]
-		out[i+3] += weight * vec[i+3]
-		out[i+4] += weight * vec[i+4]
-		out[i+5] += weight * vec[i+5]
-		out[i+6] += weight * vec[i+6]
-		out[i+7] += weight * vec[i+7]
+	if n <= 0 {
+		return
 	}
 
-	for ; i < n; i++ {
+	if hasAVX2 && n >= 8 && scaled != nil {
+		VecScaleF32(scaled, vec, weight, n)
+		VecAddF32(out, out, scaled, n)
+		return
+	}
+
+	for i := 0; i < n; i++ {
 		out[i] += weight * vec[i]
 	}
 }
