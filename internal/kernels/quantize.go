@@ -1,7 +1,6 @@
 package kernels
 
 import (
-	"math"
 	"unsafe"
 )
 
@@ -31,12 +30,7 @@ func QuantizeSymmetricINT8Into(dst *QuantizedTensorINT8, x []float32, rows, cols
 		panic("QuantizeSymmetricINT8Into: size mismatch")
 	}
 
-	absMax := float32(0)
-	for _, v := range x {
-		if abs := math.Abs(float64(v)); float32(abs) > absMax {
-			absMax = float32(abs)
-		}
-	}
+	absMax := findAbsMax(x)
 
 	if absMax == 0 {
 		if cap(dst.Data) < len(x) {
@@ -53,13 +47,43 @@ func QuantizeSymmetricINT8Into(dst *QuantizedTensorINT8, x []float32, rows, cols
 	}
 
 	scale := absMax / 127.0
+	invScale := float32(0)
+	if scale != 0 {
+		invScale = 1.0 / scale
+	}
 	if cap(dst.Data) < len(x) {
 		dst.Data = make([]int8, len(x))
 	}
 	data := dst.Data[:len(x)]
 
-	for i, v := range x {
-		q := math.Round(float64(v / scale))
+	i := 0
+	n := len(x)
+	for ; i+8 <= n; i += 8 {
+		for j := 0; j < 8; j++ {
+			v := x[i+j]
+			scaled := v * invScale
+			var q int32
+			if scaled >= 0 {
+				q = int32(scaled + 0.5)
+			} else {
+				q = int32(scaled - 0.5)
+			}
+			if q > 127 {
+				q = 127
+			} else if q < -127 {
+				q = -127
+			}
+			data[i+j] = int8(q)
+		}
+	}
+	for ; i < n; i++ {
+		scaled := x[i] * invScale
+		var q int32
+		if scaled >= 0 {
+			q = int32(scaled + 0.5)
+		} else {
+			q = int32(scaled - 0.5)
+		}
 		if q > 127 {
 			q = 127
 		} else if q < -127 {
@@ -81,6 +105,71 @@ func QuantizeSymmetricINT8(x []float32, rows, cols int) QuantizedTensorINT8 {
 	var dst QuantizedTensorINT8
 	QuantizeSymmetricINT8Into(&dst, x, rows, cols)
 	return dst
+}
+
+func findAbsMax(x []float32) float32 {
+	if len(x) == 0 {
+		return 0
+	}
+
+	max0 := float32(0)
+	max1 := float32(0)
+	max2 := float32(0)
+	max3 := float32(0)
+
+	i := 0
+	n := len(x)
+	for ; i+4 <= n; i += 4 {
+		v0 := x[i+0]
+		if v0 < 0 {
+			v0 = -v0
+		}
+		if v0 > max0 {
+			max0 = v0
+		}
+		v1 := x[i+1]
+		if v1 < 0 {
+			v1 = -v1
+		}
+		if v1 > max1 {
+			max1 = v1
+		}
+		v2 := x[i+2]
+		if v2 < 0 {
+			v2 = -v2
+		}
+		if v2 > max2 {
+			max2 = v2
+		}
+		v3 := x[i+3]
+		if v3 < 0 {
+			v3 = -v3
+		}
+		if v3 > max3 {
+			max3 = v3
+		}
+	}
+
+	for ; i < n; i++ {
+		v := x[i]
+		if v < 0 {
+			v = -v
+		}
+		if v > max0 {
+			max0 = v
+		}
+	}
+
+	if max1 > max0 {
+		max0 = max1
+	}
+	if max2 > max0 {
+		max0 = max2
+	}
+	if max3 > max0 {
+		max0 = max3
+	}
+	return max0
 }
 
 // Dequantize converts INT8 back to FP32

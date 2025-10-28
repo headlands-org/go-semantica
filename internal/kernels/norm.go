@@ -11,19 +11,27 @@ func RMSNorm(dst, src, weight []float32, eps float32) {
 		panic("RMSNorm: buffer size mismatch")
 	}
 
-	// Calculate mean of squares
-	sumSq := float32(0)
-	for i := 0; i < n; i++ {
-		sumSq += src[i] * src[i]
+	var sumSq float32
+	if hasAVX2 && n >= 8 {
+		sumSq = dotProductSIMD(src, src, n)
+	} else {
+		sumSq = sumSquaresScalar(src)
 	}
 	meanSq := sumSq / float32(n)
 
 	// Calculate RMS
 	rms := float32(math.Sqrt(float64(meanSq + eps)))
+	invRms := float32(1.0) / rms
 
-	// Normalize and scale
+	if hasAVX2 && n >= 8 {
+		VecScaleF32(dst, src, invRms, n)
+		VecMulF32(dst, dst, weight, n)
+		return
+	}
+
+	// Normalize and scale (scalar fallback)
 	for i := 0; i < n; i++ {
-		dst[i] = (src[i] / rms) * weight[i]
+		dst[i] = (src[i] * invRms) * weight[i]
 	}
 }
 
@@ -92,4 +100,12 @@ func RMSNormGemma(dst, src, weight []float32, eps float32) {
 	for i := 0; i < n; i++ {
 		dst[i] = scaled[i] / rms
 	}
+}
+
+func sumSquaresScalar(x []float32) float32 {
+	sum := float32(0)
+	for _, v := range x {
+		sum += v * v
+	}
+	return sum
 }
