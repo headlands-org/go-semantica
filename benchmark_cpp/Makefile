@@ -34,7 +34,7 @@ ifdef LLAMA_CPP_PATH
     LLAMA_DIR := $(LLAMA_CPP_PATH)
 else
     # 2. Fallback to ../llama.cpp/ relative path
-    LLAMA_DIR := ../llama.cpp
+    LLAMA_DIR := ../../llama.cpp
 endif
 
 # Verify llama.cpp directory exists
