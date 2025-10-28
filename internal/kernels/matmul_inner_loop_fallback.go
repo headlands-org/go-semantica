@@ -37,3 +37,7 @@ func matmulInnerLoopAsm(inputRow *int8, weightData *byte, scales *float32, numBl
 
 	return sum
 }
+
+func matmulInnerLoop(inputRow *int8, weightData *byte, scales *float32, numBlocks int) float32 {
+	return matmulInnerLoopAsm(inputRow, weightData, scales, numBlocks)
+}

@@ -30,6 +30,10 @@ func dotProductSDOTAsm(a, b *int8, n int) int32
 //go:noescape
 func matmulInnerLoopAsm(inputRow *int8, weightData *byte, scales *float32, numBlocks int) float32
 
+func matmulInnerLoop(inputRow *int8, weightData *byte, scales *float32, numBlocks int) float32 {
+	return matmulInnerLoopAsm(inputRow, weightData, scales, numBlocks)
+}
+
 // dotProductINT8Asm is the direct assembly call without dispatcher overhead
 // IMPORTANT: Caller must ensure slices are valid and n >= 16 for SIMD
 func dotProductINT8Asm(a, b *int8, n int) int32 {
@@ -94,13 +98,16 @@ func dotProductINT8SIMD(a, b []int8, n int) int32 {
 }
 
 // vecMulF32SIMD multiplies float32 vectors element-wise using NEON assembly.
+//
 //go:noescape
 func vecMulF32SIMD(dst, a, b *float32, n int)
 
 // vecAddF32SIMD adds float32 vectors element-wise using NEON assembly.
+//
 //go:noescape
 func vecAddF32SIMD(dst, a, b *float32, n int)
 
 // vecScaleF32SIMD scales a float32 vector by a scalar using NEON assembly.
+//
 //go:noescape
 func vecScaleF32SIMD(dst, a *float32, scale float32, n int)

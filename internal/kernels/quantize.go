@@ -373,7 +373,7 @@ func matMulQ8_0INT8Serial(dst []float32, weightData []byte, scales []float32, in
 				inputPtr := (*int8)(unsafe.Pointer(&input.Data[inputOffset]))
 				weightPtr := (*byte)(unsafe.Pointer(&weightData[weightRowOffset]))
 				scalesPtr := (*float32)(unsafe.Pointer(&scales[scaleBaseIdx]))
-				sum = matmulInnerLoopAsm(inputPtr, weightPtr, scalesPtr, fullBlocks)
+				sum = matmulInnerLoop(inputPtr, weightPtr, scalesPtr, fullBlocks)
 			}
 
 			// Handle partial block if needed

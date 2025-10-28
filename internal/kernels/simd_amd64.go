@@ -1,3 +1,4 @@
+//go:build !noasm
 // +build !noasm
 
 package kernels
@@ -6,8 +7,8 @@ import "golang.org/x/sys/cpu"
 
 // SIMD support flags
 var (
-	hasAVX2      = cpu.X86.HasAVX2
-	hasAVX512    = cpu.X86.HasAVX512F
+	hasAVX2       = cpu.X86.HasAVX2
+	hasAVX512     = cpu.X86.HasAVX512F
 	hasAVX512VNNI = cpu.X86.HasAVX512VNNI
 )
 
@@ -29,6 +30,23 @@ func dotProductINT8VNNI(a, b *int8, n int) int32
 //
 //go:noescape
 func matmulInnerLoopAsm(inputRow *int8, weightData *byte, scales *float32, numBlocks int) float32
+
+//go:noescape
+func matmulInnerLoopVNNIAsm(inputRow *int8, weightData *byte, scales *float32, numBlocks int) float32
+
+type matmulInnerLoopFn func(*int8, *byte, *float32, int) float32
+
+var currentMatmulInnerLoop matmulInnerLoopFn = matmulInnerLoopAsm
+
+func init() {
+	if hasAVX512VNNI {
+		currentMatmulInnerLoop = matmulInnerLoopVNNIAsm
+	}
+}
+
+func matmulInnerLoop(inputRow *int8, weightData *byte, scales *float32, numBlocks int) float32 {
+	return currentMatmulInnerLoop(inputRow, weightData, scales, numBlocks)
+}
 
 // dotProductINT8Asm is the direct assembly call without dispatcher overhead
 // IMPORTANT: Caller must ensure slices are valid and n >= 16 for SIMD

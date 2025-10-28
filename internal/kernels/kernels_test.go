@@ -3,6 +3,7 @@ package kernels
 import (
 	"fmt"
 	"math"
+	"math/rand"
 	"testing"
 )
 
@@ -83,6 +84,108 @@ func TestSoftmax(t *testing.T) {
 			t.Errorf("Softmax not monotonic: dst[%d]=%f >= dst[%d]=%f", i, dst[i], i+1, dst[i+1])
 		}
 	}
+}
+
+func TestSoftmaxApproximationAccuracy(t *testing.T) {
+	sizes := []int{1, 2, 3, 4, 8, 16, 32, 64, 128}
+	rng := rand.New(rand.NewSource(1234))
+
+	reference := func(src []float32) []float32 {
+		dst := make([]float32, len(src))
+		if len(src) == 0 {
+			return dst
+		}
+		maxVal := src[0]
+		for _, v := range src[1:] {
+			if v > maxVal {
+				maxVal = v
+			}
+		}
+		sum := 0.0
+		for i, v := range src {
+			e := math.Exp(float64(v - maxVal))
+			dst[i] = float32(e)
+			sum += e
+		}
+		inv := float32(1.0 / sum)
+		for i := range dst {
+			dst[i] *= inv
+		}
+		return dst
+	}
+
+	maxAbsDiff := float64(0)
+	maxRelDiff := float64(0)
+	var worstRelCase struct {
+		size   int
+		trial  int
+		index  int
+		value  float32
+		ref    float32
+		approx float32
+	}
+
+	for _, n := range sizes {
+		for trial := 0; trial < 256; trial++ {
+			src := make([]float32, n)
+			for i := range src {
+				// Sample a wide dynamic range to stress numerical stability
+				bucket := trial % 3
+				var scale float64
+				switch bucket {
+				case 0:
+					scale = 1.0
+				case 1:
+					scale = 10.0
+				default:
+					scale = 40.0
+				}
+				src[i] = float32((rng.Float64()*2 - 1) * scale)
+			}
+
+			approx := make([]float32, n)
+			Softmax(approx, src, n)
+
+			ref := reference(src)
+
+			for i := 0; i < n; i++ {
+				diff := math.Abs(float64(approx[i] - ref[i]))
+				if diff > maxAbsDiff {
+					maxAbsDiff = diff
+				}
+				refVal := float64(ref[i])
+				if math.Abs(refVal) > 5e-5 {
+					rel := diff / math.Abs(refVal)
+					if rel > maxRelDiff {
+						maxRelDiff = rel
+						worstRelCase.size = n
+						worstRelCase.trial = trial
+						worstRelCase.index = i
+						worstRelCase.value = src[i]
+						worstRelCase.ref = ref[i]
+						worstRelCase.approx = approx[i]
+					}
+				}
+			}
+
+			sum := float32(0)
+			for _, v := range approx {
+				sum += v
+			}
+			if math.Abs(float64(sum-1)) > 1e-4 {
+				t.Fatalf("softmax sum drifted: n=%d trial=%d sum=%f", n, trial, sum)
+			}
+		}
+	}
+
+	if maxAbsDiff > 6e-4 {
+		t.Fatalf("softmax max abs diff too large: %g", maxAbsDiff)
+	}
+	if maxRelDiff > 3e-3 {
+		t.Fatalf("softmax max rel diff too large: %g (n=%d trial=%d idx=%d src=%f ref=%f approx=%f)",
+			maxRelDiff, worstRelCase.size, worstRelCase.trial, worstRelCase.index, worstRelCase.value, worstRelCase.ref, worstRelCase.approx)
+	}
+	t.Logf("softmax approx max abs diff=%g, max rel diff=%g", maxAbsDiff, maxRelDiff)
 }
 
 func TestSiLU(t *testing.T) {
@@ -348,9 +451,9 @@ func TestVecMulF32(t *testing.T) {
 		name string
 		n    int
 	}{
-		{"small_7", 7},   // Test tail loop (< 8)
-		{"exact_8", 8},   // Test exactly 8 elements
-		{"medium_16", 16}, // Test 2 SIMD iterations
+		{"small_7", 7},     // Test tail loop (< 8)
+		{"exact_8", 8},     // Test exactly 8 elements
+		{"medium_16", 16},  // Test 2 SIMD iterations
 		{"large_100", 100}, // Test mixed SIMD + tail
 	}
 
@@ -385,9 +488,9 @@ func TestVecAddF32(t *testing.T) {
 		name string
 		n    int
 	}{
-		{"small_7", 7},   // Test tail loop (< 8)
-		{"exact_8", 8},   // Test exactly 8 elements
-		{"medium_16", 16}, // Test 2 SIMD iterations
+		{"small_7", 7},     // Test tail loop (< 8)
+		{"exact_8", 8},     // Test exactly 8 elements
+		{"medium_16", 16},  // Test 2 SIMD iterations
 		{"large_100", 100}, // Test mixed SIMD + tail
 	}
 
@@ -423,9 +526,9 @@ func TestVecScaleF32(t *testing.T) {
 		n     int
 		scale float32
 	}{
-		{"small_7", 7, 2.5},   // Test tail loop (< 8)
-		{"exact_8", 8, 3.0},   // Test exactly 8 elements
-		{"medium_16", 16, 0.5}, // Test 2 SIMD iterations
+		{"small_7", 7, 2.5},     // Test tail loop (< 8)
+		{"exact_8", 8, 3.0},     // Test exactly 8 elements
+		{"medium_16", 16, 0.5},  // Test 2 SIMD iterations
 		{"large_100", 100, 1.5}, // Test mixed SIMD + tail
 	}
 

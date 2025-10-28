@@ -171,15 +171,41 @@ func Softmax(dst, src []float32, n int) {
 		}
 	}
 
-	// Compute exp and sum
 	sum := float32(0)
-	for i := 0; i < n; i++ {
-		exp := float32(math.Exp(float64(src[i] - maxVal)))
-		dst[i] = exp
-		sum += exp
+	i := 0
+	for ; i+3 < n; i += 4 {
+		v0 := src[i] - maxVal
+		v1 := src[i+1] - maxVal
+		v2 := src[i+2] - maxVal
+		v3 := src[i+3] - maxVal
+
+		e0 := fastExp(v0)
+		e1 := fastExp(v1)
+		e2 := fastExp(v2)
+		e3 := fastExp(v3)
+
+		dst[i] = e0
+		dst[i+1] = e1
+		dst[i+2] = e2
+		dst[i+3] = e3
+
+		sum += e0 + e1 + e2 + e3
 	}
 
-	// Normalize
+	for ; i < n; i++ {
+		e := fastExp(src[i] - maxVal)
+		dst[i] = e
+		sum += e
+	}
+
+	if sum == 0 {
+		inv := 1.0 / float32(n)
+		for i := 0; i < n; i++ {
+			dst[i] = inv
+		}
+		return
+	}
+
 	invSum := 1.0 / sum
 	for i := 0; i < n; i++ {
 		dst[i] *= invSum
