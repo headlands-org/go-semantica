@@ -85,8 +85,22 @@ func WithVerbose(v bool) Option {
 
 // Open opens a GGUF model file and returns a Runtime
 func Open(path string, opts ...Option) (Runtime, error) {
+	return openWithLoader(func() (*modelrt.Model, error) {
+		return modelrt.LoadModel(path)
+	}, opts...)
+}
+
+// OpenBytes loads a GGUF model directly from an in-memory byte slice.
+// The caller must ensure the slice remains valid for the lifetime of the runtime.
+func OpenBytes(data []byte, opts ...Option) (Runtime, error) {
+	return openWithLoader(func() (*modelrt.Model, error) {
+		return modelrt.LoadModelFromBytes(data)
+	}, opts...)
+}
+
+func openWithLoader(loader func() (*modelrt.Model, error), opts ...Option) (Runtime, error) {
 	options := Options{
-		NumThreads: 0,     // 0 = auto-tune based on batch size
+		NumThreads: 0, // 0 = auto-tune based on batch size
 		BatchSize:  1,
 		Verbose:    false,
 	}
@@ -95,8 +109,7 @@ func Open(path string, opts ...Option) (Runtime, error) {
 		opt(&options)
 	}
 
-	// Load model
-	model, err := modelrt.LoadModel(path)
+	model, err := loader()
 	if err != nil {
 		return nil, fmt.Errorf("load model: %w", err)
 	}

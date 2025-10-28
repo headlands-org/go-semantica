@@ -108,17 +108,41 @@ func LoadModel(path string) (*Model, error) {
 		return nil, fmt.Errorf("open gguf: %w", err)
 	}
 
+	model, err := loadModel(reader)
+	if err != nil {
+		reader.Close()
+		return nil, err
+	}
+
+	return model, nil
+}
+
+// LoadModelFromBytes loads a GGUF model directly from an in-memory image.
+func LoadModelFromBytes(data []byte) (*Model, error) {
+	reader, err := gguf.OpenBytes(data)
+	if err != nil {
+		return nil, fmt.Errorf("open gguf: %w", err)
+	}
+
+	model, err := loadModel(reader)
+	if err != nil {
+		reader.Close()
+		return nil, err
+	}
+
+	return model, nil
+}
+
+func loadModel(reader *gguf.Reader) (*Model, error) {
 	// Parse config from metadata
 	config, err := parseConfig(reader)
 	if err != nil {
-		reader.Close()
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
 	// Load tokenizer
 	tok, err := tokenizer.LoadFromGGUF(reader.GetMetadata)
 	if err != nil {
-		reader.Close()
 		return nil, fmt.Errorf("load tokenizer: %w", err)
 	}
 
@@ -131,7 +155,6 @@ func LoadModel(path string) (*Model, error) {
 
 	// Load model weights
 	if err := model.loadWeights(); err != nil {
-		reader.Close()
 		return nil, fmt.Errorf("load weights: %w", err)
 	}
 
@@ -145,7 +168,6 @@ func LoadModel(path string) (*Model, error) {
 	for i := 0; i < config.NumLayers; i++ {
 		layer, err := model.loadLayerINT8(i)
 		if err != nil {
-			reader.Close()
 			return nil, fmt.Errorf("load INT8 layer %d: %w", i, err)
 		}
 		model.layersINT8[i] = layer

@@ -12,7 +12,8 @@ import (
 type Reader struct {
 	path     string
 	file     *os.File
-	mmap     mmap.MMap // []byte view of the memory-mapped file
+	mmap     mmap.MMap // memory-mapped region (nil when using in-memory data)
+	data     []byte    // backing bytes for metadata/tensor access
 	header   Header
 	metadata map[string]Metadata
 	tensors  map[string]*TensorDesc
@@ -47,6 +48,7 @@ func Open(path string) (*Reader, error) {
 		path:     path,
 		file:     file,
 		mmap:     mmapData,
+		data:     mmapData,
 		metadata: make(map[string]Metadata),
 		tensors:  make(map[string]*TensorDesc),
 	}
@@ -54,6 +56,22 @@ func Open(path string) (*Reader, error) {
 	// Parse header and metadata
 	if err := r.parse(); err != nil {
 		r.Close()
+		return nil, err
+	}
+
+	return r, nil
+}
+
+// OpenBytes creates a Reader backed directly by an in-memory GGUF image.
+// The provided slice must remain alive for the lifetime of the Reader.
+func OpenBytes(data []byte) (*Reader, error) {
+	r := &Reader{
+		data:     data,
+		metadata: make(map[string]Metadata),
+		tensors:  make(map[string]*TensorDesc),
+	}
+
+	if err := r.parse(); err != nil {
 		return nil, err
 	}
 
@@ -78,9 +96,8 @@ func (r *Reader) Close() error {
 
 // parse reads the GGUF header, metadata, and tensor info
 func (r *Reader) parse() error {
-	// The mmap []byte gives us direct access to the file
-	// We parse metadata from it without copying
-	data := r.mmap
+	// Parse metadata directly from the backing byte slice (mmap or in-memory)
+	data := r.data
 	offset := 0
 
 	// Read header
@@ -311,7 +328,7 @@ func (r *Reader) ListTensors() []string {
 }
 
 // GetTensorData returns a view of the tensor data as a byte slice
-// The returned slice is a direct view into the memory-mapped file (zero-copy)
+// The returned slice is a direct view into the backing data (zero-copy)
 func (r *Reader) GetTensorData(name string) ([]byte, error) {
 	desc, ok := r.tensors[name]
 	if !ok {
@@ -320,13 +337,12 @@ func (r *Reader) GetTensorData(name string) ([]byte, error) {
 
 	offset := r.dataOff + desc.Offset
 	end := offset + desc.Size
-	if offset < 0 || end > int64(len(r.mmap)) {
+	if offset < 0 || end > int64(len(r.data)) {
 		return nil, fmt.Errorf("tensor data out of bounds: %s (offset=%d size=%d fileSize=%d)",
-			name, offset, desc.Size, len(r.mmap))
+			name, offset, desc.Size, len(r.data))
 	}
 
-	// Return a zero-copy slice view directly into the mmap
-	return r.mmap[offset:end], nil
+	return r.data[offset:end], nil
 }
 
 // Header returns the GGUF header

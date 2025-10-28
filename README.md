@@ -1,17 +1,16 @@
 # Pure-Go GGUF Runtime
 
-A pure Go (no cgo) runtime for loading and executing GGUF format embedding models. Targets **Embedding Gemma INT8**.
+This repository contains a Go runtime for GGUF embedding models, focused on the Gemma 300M INT8 embedding variant. The code compiles with the standard Go toolchain (no cgo) and can load models either from disk or directly from embedded byte slices.
 
-## Features
+## Project Layout
+- `pkg/ggufembed`: Public API for loading models and generating embeddings.
+- `model/`: Helper that embeds `embeddinggemma-300m-Q8_0.gguf` via `go:embed` for self-contained binaries.
+- `internal/gguf`: GGUF reader implementation that supports both mmap and in-memory data.
+- `internal/runtime`: Execution engine, kernels, and tokenizer integration.
+- `cmd/` and `examples/`: CLI utilities and sample programs that exercise the runtime.
+- `testdata/` and `scripts/`: Reference artifacts, comparison tools, and benchmark helpers.
 
-- **Pure Go**: No cgo, fully portable across platforms
-- **Optimized**: AVX2 SIMD kernels with vectorized FMA
-- **Zero-copy loading**: Memory-mapped file I/O
-- **INT8 quantization**: Efficient Q8_0 quantized weights
-- **Validated**: 0.988 cosine similarity vs llama.cpp reference embeddings
-
-## Quick Start
-
+## Getting Started
 ```go
 import "github.com/lth/pure-go-llamas/pkg/ggufembed"
 
@@ -27,140 +26,38 @@ if err != nil {
 }
 ```
 
-## Examples
+To ship without external model files, use the embedded helper:
+```go
+import "github.com/lth/pure-go-llamas/model"
 
-Three complete examples demonstrate common usage patterns:
-
-### 1. Semantic Similarity (`examples/similarity/`)
-Compare semantic similarity between texts using cosine similarity:
-```bash
-go build ./examples/similarity
-./similarity model/embeddinggemma-300m-Q8_0.gguf
+rt, _ := model.Open() // loads the embedded Gemma weights straight from memory
 ```
 
-Demonstrates:
-- Loading a model from a file path
-- Generating embeddings with `EmbedSingle()`
-- Computing cosine similarity between embeddings
-- Finding most similar text pairs
+## Performance vs. llama.cpp
+Benchmarks below were run on an AMD Ryzen 9 7900 with `embeddinggemma-300m-Q8_0.gguf`. llama.cpp numbers were captured with the reference C++ benchmark in `benchmark_cpp/`.
 
-### 2. Embedded Model (`examples/similarity-embedded/`)
-Same as similarity example, but uses the embedded model via the `model` package:
-```bash
-# Build (model is embedded automatically)
-go build ./examples/similarity-embedded
-
-# Run (no model path needed!)
-./similarity-embedded
-```
-
-Demonstrates:
-- Importing `github.com/lth/pure-go-llamas/model` for embedded model access
-- Using `model.Open()` instead of `ggufembed.Open(path)`
-- Creating self-contained executables with `go:embed`
-- Pattern for deploying without external model files
-
-**Note:** The embedded binary is large (~300MB) but requires no external files to run.
-
-### 3. Batch Processing (`examples/batch/`)
-Efficiently process multiple texts in parallel:
-```bash
-go build ./examples/batch
-./batch model/embeddinggemma-300m-Q8_0.gguf
-```
-
-Demonstrates:
-- Using the `Embed()` API for batch processing
-- Automatic parallelization across texts
-- Throughput measurement and performance metrics
-
-## CLI
-
-```bash
-# Build
-go build ./cmd/gemma-embed
-
-# Generate embeddings
-echo "hello world" | ./gemma-embed -model model.gguf -format json
-
-# Batch processing
-./gemma-embed -model model.gguf -input texts.txt -output embeddings.csv
-```
-
-## Build & Test
-
-```bash
-# Build tools
-go build ./cmd/gemma-embed
-go build ./cmd/gguf-inspect
-
-# Run tests
-go test ./...
-
-# Run benchmarks
-go test -bench=. ./internal/kernels
-go test -bench=. ./internal/runtime
-```
-
-## Performance
-
-Tested with `embeddinggemma-300m-Q8_0.gguf` (314MB) on AMD Ryzen 9 7900 (12-core, 24 threads):
-
-```bash
-# Build and run comprehensive benchmark
-go build ./cmd/benchmark
-./benchmark -model ./model/embeddinggemma-300m-Q8_0.gguf -mode comprehensive
-```
-
-### Results (as of 2025-10-27)
-
-| Scenario | Metric | pure-go-llamas | llama.cpp | Ratio |
+| Scenario | Metric | pure-go-llamas | llama.cpp | Notes |
 |----------|--------|----------------|-----------|-------|
-| **Idle Memory** | Heap Allocated | 54 MB | 358 MB (RSS) | 0.15× |
-| **Single Short Doc (9w)** | P50 Latency | 49.8 ms | 8.5 ms | 5.9× slower |
-| | P95 Latency | 52.5 ms | 8.9 ms | 5.9× slower |
-| **Single Long Doc (49w)** | P50 Latency | 276.1 ms | 27.6 ms | 10.0× slower |
-| | P95 Latency | 285.9 ms | 30.0 ms | 9.5× slower |
-| **Batch Short Docs (96×)** | Throughput | 219.8 emb/sec | 252.2 emb/sec | 0.87× (87%) |
-| | Avg Latency | 4.5 ms/emb | 4.0 ms/emb | 1.1× slower |
-| | Peak Memory | 183 MB | 408 MB | 0.45× |
-| **Batch Long Docs (96×)** | Throughput | 33.0 emb/sec | 31.5 emb/sec | 1.05× (105%) |
-| | Avg Latency | 30.3 ms/emb | 31.8 ms/emb | 0.95× (faster) |
-| | Peak Memory | 222 MB | 688 MB | 0.32× |
-| **Correctness** | vs llama.cpp | 0.988 cosine similarity ✅ | 1.0 (reference) | - |
+| Idle | Memory usage | 54 MB heap | ~358 MB RSS | Go runtime is more memory-efficient at rest.
+| Single short doc (9w) | P50 latency | 49.8 ms | 8.5 ms | ~6× slower; single-document latency remains the main gap.
+| Single long doc (49w) | P50 latency | 276.1 ms | 27.6 ms | ~10× slower for long requests.
+| Batch 96× short docs | Throughput | 219.8 emb/s | 252.2 emb/s | ~87% of llama.cpp throughput.
+| Batch 96× long docs | Throughput | 33.0 emb/s | 31.5 emb/s | Slightly faster in this specific workload.
 
-**Note**: llama.cpp numbers obtained via new C++ benchmark tool (`benchmark_cpp/`) using llama.cpp libraries directly. See `scripts/compare_benchmarks.sh` for automated comparisons.
+Interpretation: single-request latency is significantly slower than llama.cpp today, but batch throughput is close, and memory usage is lower in both idle and batch scenarios.
 
-### Optimization Details
+## Status and Limitations
+- Only embedding models are supported; text generation is out of scope.
+- AVX2 kernels are provided; other SIMD ISAs are not yet implemented.
+- Correctness is validated against llama.cpp (cosine similarity ≈ 0.988). Expect small numerical drift when comparing embeddings bit-for-bit.
+- The embedded Gemma model inflates binary size by ~300 MB; use it only when the trade-off is acceptable.
 
-**Hand-written AVX2 assembly** (`matmulInnerLoopAsm`):
-- Signed INT8 multiplication via `VPMOVSXBW` (int8→int16) + `VPMADDWD`
-- Vectorized FMA accumulation with `VFMADD231PS` (8 floats at once)
-- Scale broadcasting with `VBROADCASTSS` to all YMM lanes
-- Register-resident accumulators throughout the loop
-- Horizontal reduction only at the end
+## Development
+- Build: `go build ./...`
+- Tests: `go test ./...`
+- Benchmarks: `go test -bench=. ./internal/runtime`
 
-**Validation approach**: Every optimization is validated against llama.cpp reference embeddings saved in `testdata/reference_embedding_full.txt`. Run `./validate_correctness.sh` to verify cosine similarity ≥ 0.98.
-
-### Performance Analysis
-
-**Single-document latency**: Currently 5.9-10.0× slower than llama.cpp for single document inference. This is the primary area for future optimization.
-
-**Batch throughput**: Achieves competitive performance in batch workloads:
-- Short docs (96×): 219.8 emb/sec (87% of llama.cpp's 252.2 emb/sec)
-- Long docs (96×): 33.0 emb/sec (105% of llama.cpp's 31.5 emb/sec - actually faster!)
-
-**Memory efficiency**: 54 MB idle heap, 183-222 MB peak for batch workloads. Significantly more memory-efficient than llama.cpp (358 MB idle, 408-688 MB peak).
-
-### Why Use This?
-
-- **Pure Go**: No cgo, cross-compiles easily to any platform
-- **Validated correctness**: 0.988 cosine similarity vs llama.cpp
-- **Competitive batch performance**: 87-105% of llama.cpp throughput for batch workloads
-- **Memory efficient**: Uses 2-3× less memory than llama.cpp (54 MB vs 358 MB idle)
-- **Readable code**: Straightforward Go vs complex C++ templates
-- **Trade-off**: Prioritizes portability and code clarity over raw single-document speed (5.9-10.0× slower for single docs)
+Use `AGENTS.md` for contribution guidelines. For search and edits during development, repository scripts assume `rg` and `apply_patch` workflows.
 
 ## License
-
 MIT
