@@ -5,6 +5,9 @@ gemma-embed
 gguf-inspect
 simple
 test
+/similarity
+/similarity-embedded
+/batch
 examples/test-components/test-components
 
 # Profile files

@@ -1,4 +1,5 @@
-// Batch embedding example demonstrating efficient processing of 100 sentences
+// Package main demonstrates batch embedding generation.
+// This shows how to efficiently process multiple texts in parallel using the Embed() API.
 package main
 
 import (
@@ -19,81 +20,54 @@ func main() {
 
 	modelPath := os.Args[1]
 
-	// Load model
-	fmt.Printf("Loading model from %s...\n", modelPath)
-	start := time.Now()
+	// Load the model
 	rt, err := ggufembed.Open(modelPath)
 	if err != nil {
 		log.Fatalf("Failed to open model: %v", err)
 	}
 	defer rt.Close()
-	loadTime := time.Since(start)
-	fmt.Printf("Model loaded in %v\n\n", loadTime)
 
-	// Generate 100 diverse sentences
-	sentences := generateSentences(100)
-	fmt.Printf("Generating embeddings for %d sentences...\n", len(sentences))
+	fmt.Printf("Model loaded: %d dimensions\n\n", rt.EmbedDim())
 
-	// Batch embed with timing
-	embedStart := time.Now()
-	embeddings, err := rt.Embed(context.Background(), sentences)
+	// Sample texts covering various topics
+	texts := []string{
+		"Machine learning models learn patterns from data",
+		"The Eiffel Tower is located in Paris, France",
+		"Photosynthesis converts sunlight into chemical energy",
+		"The Pacific Ocean is the largest ocean on Earth",
+		"Neural networks are inspired by biological brains",
+		"Mozart composed music during the Classical period",
+		"DNA contains genetic instructions for organisms",
+		"The Great Wall of China is visible from space",
+		"Deep learning uses multiple layers of neurons",
+		"The Amazon rainforest produces 20% of Earth's oxygen",
+	}
+
+	fmt.Printf("Processing %d texts in batch...\n", len(texts))
+
+	// Generate embeddings in batch - this is parallelized automatically
+	ctx := context.Background()
+	start := time.Now()
+
+	embeddings, err := rt.Embed(ctx, texts)
 	if err != nil {
 		log.Fatalf("Failed to generate batch embeddings: %v", err)
 	}
-	embedTime := time.Since(embedStart)
 
-	// Report statistics
-	fmt.Printf("\nBatch embedding completed:\n")
-	fmt.Printf("  Total sentences: %d\n", len(embeddings))
-	fmt.Printf("  Embedding dimension: %d\n", len(embeddings[0]))
-	fmt.Printf("  Total time: %v\n", embedTime)
-	fmt.Printf("  Average time per sentence: %v\n", embedTime/time.Duration(len(embeddings)))
-	fmt.Printf("  Throughput: %.2f sentences/second\n", float64(len(embeddings))/embedTime.Seconds())
+	elapsed := time.Since(start)
 
-	// Show sample embeddings
-	fmt.Printf("\nSample embeddings:\n")
-	for i := 0; i < 3 && i < len(sentences); i++ {
-		fmt.Printf("  [%d] %q\n", i, sentences[i])
-		fmt.Printf("      First 5 dimensions: ")
-		for j := 0; j < 5 && j < len(embeddings[i]); j++ {
-			fmt.Printf("%.4f ", embeddings[i][j])
-		}
-		fmt.Println()
-	}
-}
+	// Display results
+	fmt.Printf("\nBatch processing complete!\n")
+	fmt.Printf("Total time: %.2f ms\n", float64(elapsed.Milliseconds()))
+	fmt.Printf("Texts processed: %d\n", len(embeddings))
+	fmt.Printf("Average time per text: %.2f ms\n", float64(elapsed.Milliseconds())/float64(len(texts)))
+	fmt.Printf("Throughput: %.1f texts/second\n\n", float64(len(texts))/elapsed.Seconds())
 
-// generateSentences creates 100 diverse sentences for testing
-func generateSentences(n int) []string {
-	// Template sentences with variety
-	templates := []string{
-		"The study of %s reveals fascinating insights about the natural world",
-		"Scientists have discovered new methods for %s research",
-		"Understanding %s is crucial for advancing modern technology",
-		"Recent breakthroughs in %s have transformed our perspective",
-		"The application of %s has led to significant innovations",
-		"Researchers are exploring the connections between %s and other fields",
-		"The future of %s looks promising with emerging technologies",
-		"Experts predict that %s will revolutionize the industry",
-		"New tools for %s analysis are improving accuracy",
-		"The impact of %s on society continues to grow",
-	}
-
-	topics := []string{
-		"artificial intelligence", "machine learning", "quantum physics",
-		"molecular biology", "climate science", "neuroscience",
-		"astrophysics", "genetics", "renewable energy", "robotics",
-		"biochemistry", "computer vision", "natural language processing",
-		"data science", "cryptography", "materials science",
-		"cognitive science", "evolutionary biology", "oceanography",
-		"nanotechnology",
-	}
-
-	sentences := make([]string, 0, n)
-	for i := 0; i < n; i++ {
-		template := templates[i%len(templates)]
-		topic := topics[i%len(topics)]
-		sentences = append(sentences, fmt.Sprintf(template, topic))
-	}
-
-	return sentences
+	// Show sample embedding
+	fmt.Printf("Sample embedding (first text):\n")
+	fmt.Printf("Text: \"%s\"\n", texts[0])
+	fmt.Printf("Dimensions: %d\n", len(embeddings[0]))
+	fmt.Printf("First 5 values: [%.4f, %.4f, %.4f, %.4f, %.4f]\n",
+		embeddings[0][0], embeddings[0][1], embeddings[0][2],
+		embeddings[0][3], embeddings[0][4])
 }

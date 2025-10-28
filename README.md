@@ -27,6 +27,53 @@ if err != nil {
 }
 ```
 
+## Examples
+
+Three complete examples demonstrate common usage patterns:
+
+### 1. Semantic Similarity (`examples/similarity/`)
+Compare semantic similarity between texts using cosine similarity:
+```bash
+go build ./examples/similarity
+./similarity model/embeddinggemma-300m-Q8_0.gguf
+```
+
+Demonstrates:
+- Loading a model from a file path
+- Generating embeddings with `EmbedSingle()`
+- Computing cosine similarity between embeddings
+- Finding most similar text pairs
+
+### 2. Embedded Model (`examples/similarity-embedded/`)
+Same as similarity example, but uses the embedded model via the `model` package:
+```bash
+# Build (model is embedded automatically)
+go build ./examples/similarity-embedded
+
+# Run (no model path needed!)
+./similarity-embedded
+```
+
+Demonstrates:
+- Importing `github.com/lth/pure-go-llamas/model` for embedded model access
+- Using `model.Open()` instead of `ggufembed.Open(path)`
+- Creating self-contained executables with `go:embed`
+- Pattern for deploying without external model files
+
+**Note:** The embedded binary is large (~300MB) but requires no external files to run.
+
+### 3. Batch Processing (`examples/batch/`)
+Efficiently process multiple texts in parallel:
+```bash
+go build ./examples/batch
+./batch model/embeddinggemma-300m-Q8_0.gguf
+```
+
+Demonstrates:
+- Using the `Embed()` API for batch processing
+- Automatic parallelization across texts
+- Throughput measurement and performance metrics
+
 ## CLI
 
 ```bash

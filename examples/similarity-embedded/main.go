@@ -1,4 +1,10 @@
-// Package main demonstrates semantic similarity comparison using embeddings.
+// Package main demonstrates semantic similarity with an embedded model.
+//
+// This example imports the "model" package which embeds the GGUF model file.
+// The resulting binary is self-contained (~300MB) and requires no external files.
+//
+// Build: go build ./examples/similarity-embedded
+// Run:   ./similarity-embedded
 package main
 
 import (
@@ -6,27 +12,19 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"os"
 
-	"github.com/lth/pure-go-llamas/pkg/ggufembed"
+	"github.com/lth/pure-go-llamas/model"
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <model.gguf>\n", os.Args[0])
-		os.Exit(1)
-	}
-
-	modelPath := os.Args[1]
-
-	// Load the model
-	rt, err := ggufembed.Open(modelPath)
+	// Load the embedded model
+	rt, err := model.Open()
 	if err != nil {
-		log.Fatalf("Failed to open model: %v", err)
+		log.Fatalf("Failed to open embedded model: %v", err)
 	}
 	defer rt.Close()
 
-	fmt.Printf("Model loaded: %d dimensions\n\n", rt.EmbedDim())
+	fmt.Printf("Embedded model loaded: %d dimensions\n\n", rt.EmbedDim())
 
 	// Test sentences: two similar, one different
 	sentences := []string{
