@@ -435,54 +435,62 @@ func MatMulQ8_0INT8(dst []float32, weightData []byte, scales []float32, input *Q
 		dst[i] = 0
 	}
 
-	// Use serial execution (simpler, avoids WaitGroup contention when called from parallel contexts)
-	matMulQ8_0INT8Serial(dst, weightData, scales, input, batch, inDim, outDim, blocksPerRow, bytesPerRow)
+	matMulQ8_0INT8SerialTiled(dst, weightData, scales, input, batch, inDim, outDim, blocksPerRow, bytesPerRow)
 }
 
-// matMulQ8_0INT8Serial is the serial implementation
-func matMulQ8_0INT8Serial(dst []float32, weightData []byte, scales []float32, input *QuantizedTensorINT8, batch, inDim, outDim, blocksPerRow, bytesPerRow int) {
-	// Hoist constant values
+const (
+	q8OutTile   = 4
+	q8BatchTile = 1
+)
+
+func matMulQ8_0INT8SerialTiled(dst []float32, weightData []byte, scales []float32, input *QuantizedTensorINT8, batch, inDim, outDim, blocksPerRow, bytesPerRow int) {
 	inputScale := input.Scale
 	fullBlocks := inDim / 32
 	hasPartialBlock := inDim%32 != 0
 
-	// For each output position
-	for i := 0; i < batch; i++ {
-		inputOffset := i * inDim
+	tailStart := fullBlocks * 32
+	tailSize := inDim - tailStart
 
-		for j := 0; j < outDim; j++ {
-			// Weight row j starts at offset j * bytesPerRow
-			weightRowOffset := j * bytesPerRow
-			scaleBaseIdx := j * blocksPerRow
+	for jBlock := 0; jBlock < outDim; jBlock += q8OutTile {
+		jMax := min(jBlock+q8OutTile, outDim)
 
-			// Use fully-optimized assembly inner loop for full blocks
-			// This keeps all accumulators in YMM registers with vectorized FMA
-			sum := float32(0)
-			if fullBlocks > 0 {
+		for iBlock := 0; iBlock < batch; iBlock += q8BatchTile {
+			iMax := min(iBlock+q8BatchTile, batch)
+
+			for i := iBlock; i < iMax; i++ {
+				inputOffset := i * inDim
 				inputPtr := (*int8)(unsafe.Pointer(&input.Data[inputOffset]))
-				weightPtr := (*byte)(unsafe.Pointer(&weightData[weightRowOffset]))
-				scalesPtr := (*float32)(unsafe.Pointer(&scales[scaleBaseIdx]))
-				sum = matmulInnerLoop(inputPtr, weightPtr, scalesPtr, fullBlocks)
+				var tailSlice []int8
+				if hasPartialBlock {
+					tailSlice = input.Data[inputOffset+tailStart : inputOffset+tailStart+tailSize]
+				}
+				dstRow := dst[i*outDim:]
+
+				for j := jBlock; j < jMax; j++ {
+					weightRowOffset := j * bytesPerRow
+					scaleBaseIdx := j * blocksPerRow
+
+					sum := float32(0)
+					if fullBlocks > 0 {
+						weightPtr := (*byte)(unsafe.Pointer(&weightData[weightRowOffset]))
+						scalesPtr := (*float32)(unsafe.Pointer(&scales[scaleBaseIdx]))
+						sum = matmulInnerLoop(inputPtr, weightPtr, scalesPtr, fullBlocks)
+					}
+
+					if hasPartialBlock {
+						blockIdx := fullBlocks
+						blockOffset := weightRowOffset + blockIdx*34
+						scale := scales[scaleBaseIdx+blockIdx]
+						qsOffset := blockOffset + 2
+						weightSlice := unsafe.Slice((*int8)(unsafe.Pointer(&weightData[qsOffset])), tailSize)
+						blockSum := dotProductINT8SIMD(tailSlice, weightSlice, tailSize)
+
+						sum += float32(blockSum) * scale
+					}
+
+					dstRow[j] = sum * inputScale
+				}
 			}
-
-			// Handle partial block if needed
-			if hasPartialBlock {
-				blockIdx := fullBlocks
-				blockOffset := weightRowOffset + blockIdx*34
-				scale := scales[scaleBaseIdx+blockIdx]
-				qsOffset := blockOffset + 2
-				blockStart := blockIdx * 32
-				blockSize := inDim - blockStart
-
-				inputSlice := input.Data[inputOffset+blockStart : inputOffset+blockStart+blockSize]
-				weightSlice := unsafe.Slice((*int8)(unsafe.Pointer(&weightData[qsOffset])), blockSize)
-				blockSum := dotProductINT8SIMD(inputSlice, weightSlice, blockSize)
-
-				sum += float32(blockSum) * scale
-			}
-
-			// Apply inputScale once at the end
-			dst[i*outDim+j] = sum * inputScale
 		}
 	}
 }
