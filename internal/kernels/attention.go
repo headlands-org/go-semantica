@@ -72,27 +72,40 @@ func MultiHeadAttentionWithScale(
 	scratch []float32,
 ) {
 
+	if seqLen == 0 || nHeads == 0 || headDim == 0 || batchSize == 0 {
+		return
+	}
+
+	headStride := nHeads * headDim
+
 	// For each batch and head
 	for b := 0; b < batchSize; b++ {
+		batchBase := (b * seqLen) * headStride
+
 		for h := 0; h < nHeads; h++ {
+			// Offset within slices that corresponds to the current head.
+			headOffset := batchBase + h*headDim
+
 			// Compute attention scores: scores[i,j] = Q[i] · K[j]
-			// scores: [seqLen, seqLen]
 			for i := 0; i < seqLen; i++ {
-				qOffset := ((b*seqLen+i)*nHeads + h) * headDim
+				qOffset := headOffset + i*headStride
+				qRow := Q[qOffset : qOffset+headDim]
+				scoresRow := scratch[i*seqLen : i*seqLen+seqLen]
+
+				kOffset := headOffset
 
 				for j := 0; j < seqLen; j++ {
-					kOffset := ((b*seqLen+j)*nHeads + h) * headDim
+					kRow := K[kOffset : kOffset+headDim]
 
-					// SIMD-accelerated dot product
-					score := dotProductSIMD(Q[qOffset:qOffset+headDim], K[kOffset:kOffset+headDim], headDim)
-					score *= scale
+					score := dotProductInline(qRow, kRow) * scale
 
 					// Apply mask if provided
 					if mask != nil {
 						score += mask[i*seqLen+j]
 					}
 
-					scratch[i*seqLen+j] = score
+					scoresRow[j] = score
+					kOffset += headStride
 				}
 			}
 
@@ -103,24 +116,85 @@ func MultiHeadAttentionWithScale(
 
 			// Compute weighted sum of values: output[i] = sum_j(scores[i,j] * V[j])
 			for i := 0; i < seqLen; i++ {
-				outOffset := ((b*seqLen+i)*nHeads + h) * headDim
+				outOffset := headOffset + i*headStride
+				outRow := output[outOffset : outOffset+headDim]
 
-				// Zero output
-				for d := 0; d < headDim; d++ {
-					output[outOffset+d] = 0
+				for d := range outRow {
+					outRow[d] = 0
 				}
+
+				vOffset := headOffset
 
 				// Accumulate
 				for j := 0; j < seqLen; j++ {
 					weight := scratch[i*seqLen+j]
-					vOffset := ((b*seqLen+j)*nHeads + h) * headDim
-
-					for d := 0; d < headDim; d++ {
-						output[outOffset+d] += weight * V[vOffset+d]
+					if weight == 0 {
+						vOffset += headStride
+						continue
 					}
+
+					vRow := V[vOffset : vOffset+headDim]
+					axpy(outRow, vRow, weight)
+					vOffset += headStride
 				}
 			}
 		}
+	}
+}
+
+// dotProductInline computes the dot product of two equal-length float32 slices
+// with simple unrolling to keep ILP high without introducing additional
+// allocations. Head dimensions for embedding models tend to be multiples of
+// 8/16 (e.g., 64), making this a good fit.
+func dotProductInline(a, b []float32) float32 {
+	n := len(a)
+	if n == 0 {
+		return 0
+	}
+
+	sum0, sum1, sum2, sum3 := float32(0), float32(0), float32(0), float32(0)
+	i := 0
+
+	for ; i+16 <= n; i += 16 {
+		sum0 += a[i+0]*b[i+0] + a[i+1]*b[i+1] + a[i+2]*b[i+2] + a[i+3]*b[i+3]
+		sum1 += a[i+4]*b[i+4] + a[i+5]*b[i+5] + a[i+6]*b[i+6] + a[i+7]*b[i+7]
+		sum2 += a[i+8]*b[i+8] + a[i+9]*b[i+9] + a[i+10]*b[i+10] + a[i+11]*b[i+11]
+		sum3 += a[i+12]*b[i+12] + a[i+13]*b[i+13] + a[i+14]*b[i+14] + a[i+15]*b[i+15]
+	}
+
+	for ; i+4 <= n; i += 4 {
+		sum0 += a[i+0]*b[i+0] + a[i+1]*b[i+1] + a[i+2]*b[i+2] + a[i+3]*b[i+3]
+	}
+
+	for ; i < n; i++ {
+		sum0 += a[i] * b[i]
+	}
+
+	return ((sum0 + sum1) + (sum2 + sum3))
+}
+
+// axpy performs out += weight * vec with loop unrolling for better throughput.
+func axpy(out, vec []float32, weight float32) {
+	if weight == 0 {
+		return
+	}
+
+	n := len(out)
+	i := 0
+
+	for ; i+8 <= n; i += 8 {
+		out[i+0] += weight * vec[i+0]
+		out[i+1] += weight * vec[i+1]
+		out[i+2] += weight * vec[i+2]
+		out[i+3] += weight * vec[i+3]
+		out[i+4] += weight * vec[i+4]
+		out[i+5] += weight * vec[i+5]
+		out[i+6] += weight * vec[i+6]
+		out[i+7] += weight * vec[i+7]
+	}
+
+	for ; i < n; i++ {
+		out[i] += weight * vec[i]
 	}
 }
 
