@@ -46,18 +46,30 @@ Benchmarks collected on Ubuntu with `embeddinggemma-300m-Q8_0.gguf`. llama.cpp n
 | Batch 96× short docs | Throughput | 219.8 emb/s | 252.2 emb/s | ~87% of llama.cpp throughput.
 | Batch 96× long docs | Throughput | 33.0 emb/s | 31.5 emb/s | Slightly faster (1.05×).
 
-### macOS (M1 Pro, Metal vs. CPU)
-Benchmarks collected on macOS 14 with an Apple M1 Pro. llama.cpp was built via Homebrew and uses the Metal backend; the Go runtime is CPU-only.
+### macOS (M1 Pro, darwin/arm64)
+Benchmarks collected on macOS 14 with an Apple M1 Pro.
 
-| Scenario | Metric | pure-go-llamas | llama.cpp | Notes |
-|----------|--------|----------------|-----------|-------|
+`llama.cpp (Metal backend)` was installed via Homebrew and exercises the GPU. `llama.cpp (CPU only)` was built from source with `cmake -DGGML_METAL=OFF` to match the Go runtime’s CPU execution path.
+
+| Scenario | Metric | pure-go-llamas | llama.cpp (Metal) | Notes |
+|----------|--------|----------------|-------------------|-------|
 | Idle | Memory usage | 54 MB heap | 393 MB RSS | ~0.14× memory consumption.
-| Single short doc (9w) | P50 latency | 96.4 ms | 9.5 ms | ~10× slower; Metal acceleration dominates.
-| Single long doc (49w) | P50 latency | 513.2 ms | 11.4 ms | ~45× slower; Metal handles long contexts far faster.
-| Batch 96× short docs | Throughput | 79.4 emb/s | 1154.9 emb/s | ~7% of llama.cpp throughput; peak memory 104 MB vs 455 MB.
-| Batch 96× long docs | Throughput | 12.0 emb/s | 177.8 emb/s | ~7% of llama.cpp throughput; peak memory 152 MB vs 888 MB.
+| Single short doc (9w) | P50 latency | 96.4 ms | 9.5 ms | ~10× slower; GPU outpaces CPU-only Go path.
+| Single long doc (49w) | P50 latency | 513.2 ms | 11.4 ms | ~45× slower.
+| Batch 96× short docs | Throughput | 79.4 emb/s | 1154.9 emb/s | ~7% of Metal throughput; peak memory 104 MB vs 455 MB.
+| Batch 96× long docs | Throughput | 12.0 emb/s | 177.8 emb/s | ~7% of Metal throughput; peak memory 152 MB vs 888 MB.
 
-Interpretation: on x86_64 CPUs, batch throughput is close to llama.cpp while single-document latency still lags. On Apple Silicon, llama.cpp’s Metal backend is substantially faster than the pure CPU Go path, though Go continues to use less memory in every scenario.
+| Scenario | Metric | pure-go-llamas | llama.cpp (CPU only) | Notes |
+|----------|--------|----------------|---------------------|-------|
+| Idle | Memory usage | 54 MB heap | 373 MB RSS | ~0.14× memory consumption.
+| Single short doc (9w) | P50 latency | 96.4 ms | 7.1 ms | ~14× slower even when both are CPU-bound.
+| Single long doc (49w) | P50 latency | 513.2 ms | 44.9 ms | ~11× slower.
+| Batch 96× short docs | Throughput | 79.4 emb/s | 443.7 emb/s | ~18% of llama.cpp throughput; peak memory 104 MB vs 446 MB.
+| Batch 96× long docs | Throughput | 12.0 emb/s | 61.4 emb/s | ~20% of llama.cpp throughput; peak memory 152 MB vs 730 MB.
+
+Reproducing the CPU-only numbers requires building llama.cpp from source: `cmake -B build-cpu -DGGML_METAL=OFF -DCMAKE_BUILD_TYPE=Release && cmake --build build-cpu -j`. Point `LLAMA_CPP_PATH` at that checkout when rebuilding `benchmark_cpp`.
+
+Interpretation: on x86_64 CPUs, batch throughput is close to llama.cpp while single-document latency still lags. On Apple Silicon, llama.cpp’s Metal backend is overwhelmingly faster and even its CPU-only build leads the Go runtime, but the pure-Go path still uses noticeably less memory.
 
 ## Status and Limitations
 - Only embedding models are supported; text generation is out of scope.

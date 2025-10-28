@@ -59,6 +59,7 @@ LLAMA_SHARED := $(wildcard \
     $(LLAMA_DIR)/build/libllama.so \
     $(LLAMA_DIR)/lib/libllama.so \
     $(LLAMA_DIR)/build/bin/libllama.dylib \
+    $(LLAMA_DIR)/build-cpu/bin/libllama.dylib \
     $(LLAMA_DIR)/libllama.dylib \
     $(LLAMA_DIR)/build/libllama.dylib \
     $(LLAMA_DIR)/lib/libllama.dylib)
@@ -107,6 +108,9 @@ METRICS_TEST_OBJECTS := $(METRICS_TEST_SOURCES:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o
 # Include paths
 ifndef SKIP_LLAMA
     INCLUDES := -I$(INCLUDE_DIR) -I$(LLAMA_INCLUDE)
+    ifneq ($(wildcard $(LLAMA_DIR)/ggml/include),)
+        INCLUDES += -I$(LLAMA_DIR)/ggml/include
+    endif
 else
     INCLUDES := -I$(INCLUDE_DIR)
 endif
