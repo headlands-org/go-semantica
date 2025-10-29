@@ -368,24 +368,33 @@ func MatMulQ8_0INT8(dst []float32, weightData []byte, scales []float32, input *Q
 	matMulQ8_0INT8SerialTiled(dst, weightData, scales, input, batch, inDim, outDim, blocksPerRow, bytesPerRow)
 }
 
-const (
-	q8OutTile   = 4
-	q8BatchTile = 1
-)
-
 func matMulQ8_0INT8SerialTiled(dst []float32, weightData []byte, scales []float32, input *QuantizedTensorINT8, batch, inDim, outDim, blocksPerRow, bytesPerRow int) {
 	inputScale := input.Scale
 	fullBlocks := inDim / 32
 	hasPartialBlock := inDim%32 != 0
 
+	tileOut := 4
+	if outDim >= 512 {
+		tileOut = 16
+	} else if outDim >= 256 {
+		tileOut = 8
+	}
+
+	tileBatch := 1
+	if batch >= 8 {
+		tileBatch = 4
+	} else if batch >= 4 {
+		tileBatch = 2
+	}
+
 	tailStart := fullBlocks * 32
 	tailSize := inDim - tailStart
 
-	for jBlock := 0; jBlock < outDim; jBlock += q8OutTile {
-		jMax := min(jBlock+q8OutTile, outDim)
+	for jBlock := 0; jBlock < outDim; jBlock += tileOut {
+		jMax := min(jBlock+tileOut, outDim)
 
-		for iBlock := 0; iBlock < batch; iBlock += q8BatchTile {
-			iMax := min(iBlock+q8BatchTile, batch)
+		for iBlock := 0; iBlock < batch; iBlock += tileBatch {
+			iMax := min(iBlock+tileBatch, batch)
 
 			for i := iBlock; i < iMax; i++ {
 				inputOffset := i * inDim
