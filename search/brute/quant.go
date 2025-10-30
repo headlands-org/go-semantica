@@ -54,11 +54,27 @@ func dequantizeInt16(src []int16, dst []float32) {
 	}
 }
 
-func dotInt8(vec []int8, query []float32, dim int) float32 {
+var int8ToFloat32 = func() [256]float32 {
 	const scale = 1.0 / 127.0
-	sum := float32(0)
-	for i := 0; i < dim; i++ {
-		sum += query[i] * float32(vec[i]) * scale
+	var lut [256]float32
+	for i := 0; i < 256; i++ {
+		lut[i] = float32(int8(i-128)) * scale
+	}
+	return lut
+}()
+
+func dotInt8(vec []int8, query []float32, dim int) float32 {
+	sum0, sum1, sum2, sum3 := float32(0), float32(0), float32(0), float32(0)
+	i := 0
+	for ; i+4 <= dim; i += 4 {
+		sum0 += query[i] * int8ToFloat32[uint8(vec[i])]
+		sum1 += query[i+1] * int8ToFloat32[uint8(vec[i+1])]
+		sum2 += query[i+2] * int8ToFloat32[uint8(vec[i+2])]
+		sum3 += query[i+3] * int8ToFloat32[uint8(vec[i+3])]
+	}
+	sum := sum0 + sum1 + sum2 + sum3
+	for ; i < dim; i++ {
+		sum += query[i] * int8ToFloat32[uint8(vec[i])]
 	}
 	return sum
 }

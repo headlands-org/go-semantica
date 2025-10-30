@@ -2,6 +2,7 @@ package brute
 
 import (
 	"context"
+	"math/rand"
 	"testing"
 )
 
@@ -57,6 +58,44 @@ func TestBuilderSearchAndRoundTrip(t *testing.T) {
 		}
 		if len(vec) != idx.Dimension() {
 			t.Fatalf("vector length mismatch for id %d", id)
+		}
+	}
+}
+
+func BenchmarkSearchVectorInt8(b *testing.B) {
+	const (
+		dimension = 256
+		count     = 4096
+		topK      = 10
+	)
+
+	rng := rand.New(rand.NewSource(42))
+	builder := NewBuilder(WithDimension(dimension), WithQuantization(QuantizeInt8))
+	for i := 0; i < count; i++ {
+		vec := make([]float32, dimension)
+		for j := range vec {
+			vec[j] = float32(rng.NormFloat64())
+		}
+		normalize(vec)
+		if err := builder.AddVector(int32(i), vec); err != nil {
+			b.Fatalf("AddVector: %v", err)
+		}
+	}
+	idxIface, err := builder.Build(context.Background())
+	if err != nil {
+		b.Fatalf("Build failed: %v", err)
+	}
+	idx := idxIface.(*Index)
+
+	query := make([]float32, dimension)
+	for i := range query {
+		query[i] = float32(rng.NormFloat64())
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := idx.SearchVector(query, topK); err != nil {
+			b.Fatalf("SearchVector: %v", err)
 		}
 	}
 }
