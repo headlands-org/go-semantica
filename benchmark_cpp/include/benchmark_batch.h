@@ -21,9 +21,10 @@ namespace benchmark {
  * @param modelPath Path to the GGUF model file
  * @param duration Duration to run the benchmark in seconds
  * @param batchSize Number of texts to process in each batch
+ * @param threads llama.cpp CPU threads per context
  * @return 0 on success, non-zero on failure
  */
-int runBatchMode(const std::string& modelPath, int duration, int batchSize);
+int runBatchMode(const std::string& modelPath, int duration, int batchSize, int threads);
 
 } // namespace benchmark
 

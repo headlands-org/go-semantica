@@ -10,12 +10,13 @@
 
 namespace benchmark {
 
-int runBatchMode(const std::string& modelPath, int duration, int batchSize) {
+int runBatchMode(const std::string& modelPath, int duration, int batchSize, int threads) {
+    int thread_count = threads > 0 ? threads : 1;
     try {
         std::cout << "Loading model from: " << modelPath << std::endl;
 
         // Load model once (shared across all iterations)
-        embedding::LlamaModel model(modelPath);
+        embedding::LlamaModel model(modelPath, /*n_ctx=*/0, /*n_batch=*/16384, thread_count);
 
         std::cout << "Model loaded successfully!" << std::endl;
         std::cout << "  Embedding dimension: " << model.getEmbeddingDim() << std::endl;
@@ -79,6 +80,11 @@ int runBatchMode(const std::string& modelPath, int duration, int batchSize) {
         double durationSeconds = throughputCounter.getDurationSeconds();
         double throughput = throughputCounter.getThroughput();
         double avgLatencyMs = throughputCounter.getAvgLatencyMs();
+        double computeSeconds = throughputCounter.getCpuSeconds();
+        double avgComputeMs = 0.0;
+        if (totalEmbeddings > 0 && computeSeconds > 0.0) {
+            avgComputeMs = (computeSeconds * 1000.0) / totalEmbeddings;
+        }
         double rssMB = memStats.getRssMB();
 
         // Print results in Go format
@@ -92,6 +98,9 @@ int runBatchMode(const std::string& modelPath, int duration, int batchSize) {
                   << throughput << " embeddings/sec" << std::endl;
         std::cout << "Average latency: " << std::fixed << std::setprecision(2)
                   << avgLatencyMs << "ms per embedding" << std::endl;
+        std::cout << "Compute time: " << std::fixed << std::setprecision(3)
+                  << computeSeconds << "s (" << std::fixed << std::setprecision(3)
+                  << avgComputeMs << "ms per embedding)" << std::endl;
 
         // Print memory statistics
         std::cout << std::endl;

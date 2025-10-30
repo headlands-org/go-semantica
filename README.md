@@ -36,40 +36,31 @@ rt, _ := model.Open() // loads the embedded Gemma weights straight from memory
 ## Performance vs. llama.cpp
 
 ### Linux (Ryzen 9 7900, x86_64)
-Benchmarks collected on Ubuntu with `embeddinggemma-300m-Q8_0.gguf`. llama.cpp numbers come from the C++ benchmark in `benchmark_cpp/` compiled against the CPU backend.
+Benchmarks collected on Arch Linux with `embeddinggemma-300m-Q8_0.gguf`. The Go CLI reports wall-clock and combined CPU time (user + sys); the C++ harness now accepts `-threads` (default `2×` logical cores) so llama.cpp can scale beyond its baked-in `GGML_DEFAULT_N_THREADS = 4`. Effective core count is simply `CPU ÷ wall`.
 
-| Scenario | Metric | pure-go-llamas | llama.cpp | Notes |
-|----------|--------|----------------|-----------|-------|
-| Idle | Memory usage | 54 MB heap | ~358 MB RSS | ~0.15× memory; pure Go keeps resident set smaller.
-| Single short doc (9w) | P50 latency | 37.8 ms | 8.5 ms | ~4.4× slower.
-| Single long doc (49w) | P50 latency | 192.8 ms | 27.6 ms | ~7.0× slower.
-| Batch 96× short docs | Throughput | 308.1 emb/s | 252.2 emb/s | ~1.22× llama.cpp throughput.
-| Batch 96× long docs | Throughput | 50.5 emb/s | 31.5 emb/s | ~1.6× llama.cpp throughput.
+**Single-document latency (P50)**
 
-### macOS (M1 Pro, darwin/arm64)
-Benchmarks collected on macOS 14 with an Apple M1 Pro.
+| Runtime (threads) | Short 9 w | Cores | Long 49 w | Cores | Extra-long ~400 w | Cores |
+|-------------------|-----------|-------|-----------|-------|-------------------|-------|
+| pure-go-llamas    | 17.3 ms / 60.9 ms | 3.5× | 76.9 ms / 289.2 ms | 3.8× | 1243.6 ms / 3248.5 ms | 2.6× |
+| llama.cpp (4)     | 8.1 ms / 31.9 ms | 3.9× | 28.1 ms / 111.6 ms | 4.0× | 281.7 ms / 1123.0 ms | 4.0× |
+| llama.cpp (48)    | 38.5 ms / 323.5 ms | 8.4× | 55.0 ms / 526.1 ms | 9.6× | **243.0 ms / 3074.4 ms** | **12.6×** |
 
-`llama.cpp (Metal backend)` was installed via Homebrew and exercises the GPU. `llama.cpp (CPU only)` was built from source with `cmake -DGGML_METAL=OFF` to match the Go runtime’s CPU execution path.
+**Batch throughput (96×, 20 s runs)**
 
-| Scenario | Metric | pure-go-llamas | llama.cpp (Metal) | Notes |
-|----------|--------|----------------|-------------------|-------|
-| Idle | Memory usage | 54 MB heap | 393 MB RSS | ~0.14× memory consumption.
-| Single short doc (9w) | P50 latency | 96.4 ms | 9.5 ms | ~10× slower; GPU outpaces CPU-only Go path.
-| Single long doc (49w) | P50 latency | 513.2 ms | 11.4 ms | ~45× slower.
-| Batch 96× short docs | Throughput | 79.4 emb/s | 1154.9 emb/s | ~7% of Metal throughput; peak memory 104 MB vs 455 MB.
-| Batch 96× long docs | Throughput | 12.0 emb/s | 177.8 emb/s | ~7% of Metal throughput; peak memory 152 MB vs 888 MB.
+| Runtime (threads) | Short docs emb/s | CPU / emb | Cores | Long docs emb/s | CPU / emb | Cores |
+|-------------------|------------------|-----------|-------|-----------------|-----------|-------|
+| pure-go-llamas    | 285.2            | 74.99 ms  | 21.6× | 47.1            | 469.44 ms | 22.5× |
+| llama.cpp (4)     | 253.3            | 15.73 ms  | 4.0×  | 31.5            | 125.06 ms | 4.2× |
+| llama.cpp (48)    | 266.8            | 46.47 ms  | 12.9× | 42.8            | 354.16 ms | 15.3× |
 
-| Scenario | Metric | pure-go-llamas | llama.cpp (CPU only) | Notes |
-|----------|--------|----------------|---------------------|-------|
-| Idle | Memory usage | 54 MB heap | 373 MB RSS | ~0.14× memory consumption.
-| Single short doc (9w) | P50 latency | 96.4 ms | 7.1 ms | ~14× slower even when both are CPU-bound.
-| Single long doc (49w) | P50 latency | 513.2 ms | 44.9 ms | ~11× slower.
-| Batch 96× short docs | Throughput | 79.4 emb/s | 443.7 emb/s | ~18% of llama.cpp throughput; peak memory 104 MB vs 446 MB.
-| Batch 96× long docs | Throughput | 12.0 emb/s | 61.4 emb/s | ~20% of llama.cpp throughput; peak memory 152 MB vs 730 MB.
+**Snapshot**
 
-Reproducing the CPU-only numbers requires building llama.cpp from source: `cmake -B build-cpu -DGGML_METAL=OFF -DCMAKE_BUILD_TYPE=Release && cmake --build build-cpu -j`. Point `LLAMA_CPP_PATH` at that checkout when rebuilding `benchmark_cpp`.
+- llama.cpp keeps four cores busy by default; with `-threads` it scales linearly, driving the ~400-token doc to 243 ms wall while consuming ~12–15 cores.  
+- pure-go-llamas still sheds parallelism on long sequences (~11 % utilisation), so closing the latency gap now means reducing per-token CPU rather than spawning more goroutines.  
+- Our batch path already saturates most of the socket (>21 cores) but each embedding still costs ~5× more CPU than llama.cpp—kernel efficiency remains the bottleneck.  
 
-Interpretation: on x86_64 CPUs, batch throughput is close to llama.cpp while single-document latency still lags. On Apple Silicon, llama.cpp’s Metal backend is overwhelmingly faster and even its CPU-only build leads the Go runtime, but the pure-Go path still uses noticeably less memory.
+Idle footprint remains ~54 MB heap for pure Go vs. ~356 MB RSS for llama.cpp.
 
 ## Status and Limitations
 - Only embedding models are supported; text generation is out of scope.

@@ -27,6 +27,8 @@ void printUsage(const char* prog) {
     std::cerr << "        Batch size for batch mode (default " << (numCPU * 4) << ")" << std::endl;
     std::cerr << "  -workers int" << std::endl;
     std::cerr << "        Number of worker goroutines (default " << (numCPU * 2) << ")" << std::endl;
+    std::cerr << "  -threads int" << std::endl;
+    std::cerr << "        llama.cpp CPU threads per context (default " << (numCPU * 2) << ")" << std::endl;
     std::cerr << std::endl;
     std::cerr << "Example commands:" << std::endl;
     std::cerr << "  # Batch mode with 10 second run" << std::endl;
@@ -45,7 +47,8 @@ struct Config {
     std::string mode;
     int duration = 0;
     int batchSize = -1;  // -1 means use default (NumCPU * 4)
-    int workers = -1;     // -1 means use default (NumCPU * 2)
+    int workers = -1;    // -1 means use default (NumCPU * 2)
+    int threads = -1;    // -1 means use default (NumCPU * 2)
     bool valid = false;
 };
 
@@ -104,6 +107,12 @@ Config parseArgs(int argc, char** argv) {
                 return config;
             }
             config.workers = std::stoi(value);
+        } else if (flag == "-threads") {
+            if (value.empty()) {
+                std::cerr << "Error: -threads requires a value" << std::endl;
+                return config;
+            }
+            config.threads = std::stoi(value);
         } else {
             std::cerr << "Error: Unknown flag: " << flag << std::endl;
             return config;
@@ -116,6 +125,12 @@ Config parseArgs(int argc, char** argv) {
     }
     if (config.workers == -1) {
         config.workers = numCPU * 2;
+    }
+    if (config.threads == -1) {
+        config.threads = static_cast<int>(numCPU) * 2;
+        if (config.threads <= 0) {
+            config.threads = 1;
+        }
     }
 
     // Validate required flags
@@ -160,13 +175,13 @@ int main(int argc, char** argv) {
 
     try {
         if (config.mode == "batch") {
-            return benchmark::runBatchMode(config.modelPath, config.duration, config.batchSize);
+            return benchmark::runBatchMode(config.modelPath, config.duration, config.batchSize, config.threads);
         } else if (config.mode == "isolated") {
-            auto results = benchmark::runIsolatedMode(config.modelPath, config.duration, config.workers);
+            auto results = benchmark::runIsolatedMode(config.modelPath, config.duration, config.workers, config.threads);
             // runIsolatedMode prints its own output, just check if we got results
             return results.empty() ? 1 : 0;
         } else if (config.mode == "comprehensive") {
-            benchmark::runComprehensiveMode(config.modelPath);
+            benchmark::runComprehensiveMode(config.modelPath, config.threads);
             return 0;
         } else {
             std::cerr << "Unknown mode: " << config.mode << std::endl;

@@ -25,12 +25,14 @@ struct WorkerResult {
  * @param model_path Path to GGUF model file
  * @param duration_sec Benchmark duration in seconds
  * @param num_workers Number of worker threads to spawn
+ * @param threads llama.cpp CPU threads per worker context
  * @return Vector of per-worker results
  */
 std::vector<WorkerResult> runIsolatedMode(
     const std::string& model_path,
     int duration_sec,
-    int num_workers
+    int num_workers,
+    int context_threads
 );
 
 } // namespace benchmark

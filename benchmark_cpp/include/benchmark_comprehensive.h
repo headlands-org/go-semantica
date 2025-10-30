@@ -20,8 +20,9 @@ namespace benchmark {
  * - Table with columns: Scenario | Metric | Value | Unit
  *
  * @param model_path Path to the GGUF model file
+ * @param threads llama.cpp CPU threads to use for measurements
  */
-void runComprehensiveMode(const std::string& model_path);
+void runComprehensiveMode(const std::string& model_path, int threads);
 
 } // namespace benchmark
 

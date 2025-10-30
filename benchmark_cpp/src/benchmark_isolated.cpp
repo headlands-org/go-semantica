@@ -20,11 +20,13 @@ static void workerFunc(
     const std::string& model_path,
     int worker_id,
     std::atomic<bool>& stop_flag,
-    WorkerResult& result)
+    WorkerResult& result,
+    int context_threads)
 {
     try {
         // Load model instance (independent per worker)
-        embedding::LlamaModel model(model_path);
+        int thread_count = context_threads > 0 ? context_threads : 1;
+        embedding::LlamaModel model(model_path, /*n_ctx=*/0, /*n_batch=*/16384, thread_count);
 
         std::cerr << "Worker " << worker_id << ": model loaded, starting benchmark\n";
 
@@ -63,7 +65,8 @@ static void workerFunc(
 std::vector<WorkerResult> runIsolatedMode(
     const std::string& model_path,
     int duration_sec,
-    int num_workers)
+    int num_workers,
+    int context_threads)
 {
     // Create stop flag (atomic for thread safety)
     std::atomic<bool> stop_flag(false);
@@ -72,20 +75,22 @@ std::vector<WorkerResult> runIsolatedMode(
     std::vector<WorkerResult> results(num_workers);
 
     // Create thread vector
-    std::vector<std::thread> threads;
-    threads.reserve(num_workers);
+    std::vector<std::thread> worker_threads;
+    worker_threads.reserve(num_workers);
 
     // Record start time
     auto start_time = std::chrono::high_resolution_clock::now();
+    double cpu_start = metrics::getProcessCpuTimeSeconds();
 
     // Launch worker threads
     for (int i = 0; i < num_workers; ++i) {
-        threads.emplace_back(
+        worker_threads.emplace_back(
             workerFunc,
             std::cref(model_path),
             i,
             std::ref(stop_flag),
-            std::ref(results[i])
+            std::ref(results[i]),
+            context_threads
         );
     }
 
@@ -96,7 +101,7 @@ std::vector<WorkerResult> runIsolatedMode(
     stop_flag.store(true, std::memory_order_release);
 
     // Join all threads (wait for them to complete)
-    for (auto& thread : threads) {
+    for (auto& thread : worker_threads) {
         if (thread.joinable()) {
             thread.join();
         }
@@ -106,6 +111,11 @@ std::vector<WorkerResult> runIsolatedMode(
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
     double duration_seconds = duration.count() / 1e9;
+    double cpu_end = metrics::getProcessCpuTimeSeconds();
+    double compute_seconds = cpu_end - cpu_start;
+    if (compute_seconds < 0.0) {
+        compute_seconds = 0.0;
+    }
 
     // Calculate aggregate metrics
     int total_embeddings = 0;
@@ -123,16 +133,22 @@ std::vector<WorkerResult> runIsolatedMode(
     }
 
     double avg_count = static_cast<double>(total_embeddings) / num_workers;
-    double throughput = total_embeddings / duration_seconds;
-    double avg_latency_ms = (duration_seconds * 1000.0) / total_embeddings;
+    double throughput = duration_seconds > 0.0 ? total_embeddings / duration_seconds : 0.0;
+    double avg_latency_ms = total_embeddings > 0 ? (duration_seconds * 1000.0) / total_embeddings : 0.0;
+    double avg_compute_ms = 0.0;
+    if (total_embeddings > 0 && compute_seconds > 0.0) {
+        avg_compute_ms = (compute_seconds * 1000.0) / total_embeddings;
+    }
 
     // Print benchmark results
     metrics::OutputFormatter::printBenchmarkResults(
         "isolated",
         duration_seconds,
+        compute_seconds,
         total_embeddings,
         throughput,
-        avg_latency_ms
+        avg_latency_ms,
+        avg_compute_ms
     );
 
     // Print per-worker statistics
