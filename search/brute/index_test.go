@@ -152,6 +152,33 @@ func TestDotInt16MatchesFloat32(t *testing.T) {
 	}
 }
 
+func TestDotFloat32MatchesReference(t *testing.T) {
+	const (
+		dim     = 256
+		samples = 50
+	)
+	rng := rand.New(rand.NewSource(654))
+	for i := 0; i < samples; i++ {
+		vec := make([]float32, dim)
+		query := make([]float32, dim)
+		for j := 0; j < dim; j++ {
+			vec[j] = float32(rng.NormFloat64())
+			query[j] = float32(rng.NormFloat64())
+		}
+		normalize(vec)
+		normalize(query)
+
+		got := dotFloat32(vec, query)
+		want := float32(0)
+		for j := 0; j < dim; j++ {
+			want += vec[j] * query[j]
+		}
+		if math.Abs(float64(got-want)) > 1e-5 {
+			t.Fatalf("dot float mismatch: got %.8f want %.8f diff=%.8f", got, want, got-want)
+		}
+	}
+}
+
 func TestSearchNormalizedMatchesFloat32(t *testing.T) {
 	const (
 		dim     = 64

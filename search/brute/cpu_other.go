@@ -2,4 +2,7 @@
 
 package brute
 
-const hasAVX2 = false
+const (
+	hasAVX2 = false
+	hasFMA  = false
+)

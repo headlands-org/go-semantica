@@ -4,4 +4,7 @@ package brute
 
 import "golang.org/x/sys/cpu"
 
-var hasAVX2 = cpu.X86.HasAVX2
+var (
+	hasAVX2 = cpu.X86.HasAVX2
+	hasFMA  = cpu.X86.HasFMA
+)

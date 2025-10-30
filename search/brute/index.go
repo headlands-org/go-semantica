@@ -197,6 +197,16 @@ func (idx *Index) ForEach(fn func(id int32, vec []float32)) {
 
 func dotFloat32(a, b []float32) float32 {
 	sum := float32(0)
+	dim := len(a)
+	if hasAVX2 && hasFMA && dim >= 8 {
+		n := dim &^ 7
+		if n > 0 {
+			sum += dotFloat32AVX2(&a[0], &b[0], n)
+			a = a[n:]
+			b = b[n:]
+		}
+	}
+
 	for i := range a {
 		sum += a[i] * b[i]
 	}

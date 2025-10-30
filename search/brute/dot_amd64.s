@@ -67,7 +67,7 @@ loopInt16:
     CMPQ CX, $8
     JGE loopInt16
 
- dotInt16Reduce:
+dotInt16Reduce:
     VEXTRACTF128 $1, Y4, X1
     VADDPS X1, X4, X4
     VHADDPS X4, X4, X4
@@ -76,3 +76,30 @@ loopInt16:
     VZEROUPPER
     RET
 
+// func dotFloat32AVX2(vec *float32, query *float32, length int) float32
+TEXT ·dotFloat32AVX2(SB), NOSPLIT, $0-28
+    MOVQ vec+0(FP), AX
+    MOVQ query+8(FP), BX
+    MOVQ length+16(FP), CX
+    VXORPS Y4, Y4, Y4
+    CMPQ CX, $8
+    JL dotFloatReduce
+
+loopFloat:
+    VMOVUPS (AX), Y0
+    VMOVUPS (BX), Y1
+    VFMADD231PS Y1, Y0, Y4
+    ADDQ $32, AX
+    ADDQ $32, BX
+    SUBQ $8, CX
+    CMPQ CX, $8
+    JGE loopFloat
+
+dotFloatReduce:
+    VEXTRACTF128 $1, Y4, X1
+    VADDPS X1, X4, X4
+    VHADDPS X4, X4, X4
+    VHADDPS X4, X4, X4
+    MOVSS X4, ret+24(FP)
+    VZEROUPPER
+    RET
