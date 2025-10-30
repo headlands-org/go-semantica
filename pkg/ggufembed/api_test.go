@@ -2,6 +2,7 @@ package ggufembed
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"testing"
 )
@@ -122,7 +123,7 @@ func TestBasicEmbedding(t *testing.T) {
 	}
 
 	// Verify embedding has expected dimension
-	expectedDim := rt.EmbedDim()
+	expectedDim := DefaultEmbedDim
 	if len(embedding) != expectedDim {
 		t.Errorf("Expected embedding dimension %d, got %d", expectedDim, len(embedding))
 	}
@@ -140,6 +141,46 @@ func TestBasicEmbedding(t *testing.T) {
 	if norm < 0.99 || norm > 1.01 {
 		t.Errorf("Expected L2 norm ~1.0, got %f", norm)
 	}
+
+	// Verify custom dimension paths
+	dimTests := []int{768, 512, 256, 128}
+	for _, d := range dimTests {
+		t.Run(fmt.Sprintf("Dim%d", d), func(t *testing.T) {
+			emb, err := rt.EmbedSingleInput(ctx, EmbedInput{
+				Task:    TaskSearchQuery,
+				Content: text,
+				Dim:     d,
+			})
+			if err != nil {
+				t.Fatalf("Embed with dim %d failed: %v", d, err)
+			}
+			if len(emb) != d {
+				t.Fatalf("Expected dimension %d, got %d", d, len(emb))
+			}
+			var sumSq float32
+			for _, v := range emb {
+				sumSq += v * v
+			}
+			if sumSq == 0 {
+				t.Fatalf("Dimension %d embedding is zero vector", d)
+			}
+			norm := float32(math.Sqrt(float64(sumSq)))
+			if norm < 0.99 || norm > 1.01 {
+				t.Fatalf("Dimension %d embedding not normalized: %f", d, norm)
+			}
+		})
+	}
+
+	t.Run("UnsupportedDim", func(t *testing.T) {
+		_, err := rt.EmbedSingleInput(ctx, EmbedInput{
+			Task:    TaskSearchQuery,
+			Content: text,
+			Dim:     1024,
+		})
+		if err == nil {
+			t.Fatal("expected error for unsupported dimension")
+		}
+	})
 }
 
 // TestBatchProcessing verifies that batch processing works correctly
@@ -205,9 +246,9 @@ func TestBatchProcessing(t *testing.T) {
 
 			// Verify each embedding
 			for i, emb := range embeddings {
-				if len(emb) != rt.EmbedDim() {
+				if len(emb) != DefaultEmbedDim {
 					t.Errorf("Embedding %d has wrong dimension: %d (expected %d)",
-						i, len(emb), rt.EmbedDim())
+						i, len(emb), DefaultEmbedDim)
 				}
 
 				// Check normalization

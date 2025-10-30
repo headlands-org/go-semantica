@@ -74,6 +74,45 @@ type EmbedInput struct {
 	// query-style tasks. Leave empty to use the recommended strings from the
 	// model card.
 	CustomTaskDescription string
+
+	// Dim specifies the requested embedding dimension. Supported values align
+	// with EmbeddingGemma's Matryoshka Representation Learning tiers:
+	//   768, 512, 256, 128. A value of 0 selects DefaultEmbedDim (512).
+	Dim int
+}
+
+const (
+	// DefaultEmbedDim is the embedding dimension used when callers do not
+	// specify a value. This matches the recommended truncation tier for most
+	// retrieval workloads.
+	DefaultEmbedDim = 512
+)
+
+var supportedDims = []int{768, 512, 256, 128}
+
+var supportedDimSet = map[int]struct{}{
+	768: {},
+	512: {},
+	256: {},
+	128: {},
+}
+
+// ResolveDim validates dim and applies the default when zero.
+func ResolveDim(dim int) (int, error) {
+	if dim == 0 {
+		return DefaultEmbedDim, nil
+	}
+	if _, ok := supportedDimSet[dim]; !ok {
+		return 0, fmt.Errorf("unsupported embed dim %d (allowed: 768, 512, 256, 128)", dim)
+	}
+	return dim, nil
+}
+
+// SupportedDims returns the list of valid embedding dimensions in descending order.
+func SupportedDims() []int {
+	cp := make([]int, len(supportedDims))
+	copy(cp, supportedDims)
+	return cp
 }
 
 // prompt builds the prompt string expected by EmbeddingGemma.

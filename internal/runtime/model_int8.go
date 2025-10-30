@@ -139,9 +139,13 @@ func (m *Model) loadTensorQ8Bytes(name string) ([]byte, error) {
 	return data, nil
 }
 
-// ForwardINT8 performs INT8 quantized inference
-// This is experimental and may have accuracy tradeoffs
+// ForwardINT8 performs INT8 quantized inference returning the full embedding dimension.
 func (m *Model) ForwardINT8(tokenIDs []int) ([]float32, error) {
+	return m.forwardINT8WithDim(tokenIDs, m.config.EmbedDim)
+}
+
+// forwardINT8WithDim performs INT8 quantized inference with output truncated to targetDim.
+func (m *Model) forwardINT8WithDim(tokenIDs []int, targetDim int) ([]float32, error) {
 	seqLen := len(tokenIDs)
 	if seqLen == 0 {
 		return nil, fmt.Errorf("empty input")
@@ -234,13 +238,21 @@ func (m *Model) ForwardINT8(tokenIDs []int) ([]float32, error) {
 	}
 
 	// Pool to single embedding
-	embedding := make([]float32, embDim)
-	kernels.MeanPooling(embedding, hidden, seqLen, embDim)
+	outDim := targetDim
+	if outDim <= 0 || outDim > embDim {
+		outDim = embDim
+	}
 
-	// L2 normalize
-	l2Normalize(embedding)
+	pooled := ensureFloat32(&ws.pooled, outDim)
+	kernels.MeanPoolingPartial(pooled, hidden, seqLen, embDim, outDim)
 
-	return embedding, nil
+	// L2 normalize over requested slice
+	l2Normalize(pooled[:outDim])
+
+	result := make([]float32, outDim)
+	copy(result, pooled[:outDim])
+
+	return result, nil
 }
 
 func (m *Model) matMulQ8_0INT8Tiled(dst []float32, weightData []byte, scales []float32, input *kernels.QuantizedTensorINT8, batch, inDim, outDim, tileOut int) {

@@ -150,6 +150,7 @@ func (r *embedRuntime) Embed(ctx context.Context, texts []string) ([][]float32, 
 		inputs[i] = EmbedInput{
 			Task:    TaskSearchQuery,
 			Content: text,
+			Dim:     DefaultEmbedDim,
 		}
 	}
 	return r.EmbedInputs(ctx, inputs)
@@ -160,6 +161,7 @@ func (r *embedRuntime) EmbedSingle(ctx context.Context, text string) ([]float32,
 	return r.EmbedSingleInput(ctx, EmbedInput{
 		Task:    TaskSearchQuery,
 		Content: text,
+		Dim:     DefaultEmbedDim,
 	})
 }
 
@@ -168,16 +170,20 @@ func (r *embedRuntime) EmbedInputs(ctx context.Context, inputs []EmbedInput) ([]
 		return nil, nil
 	}
 
-	prompts := make([]string, len(inputs))
+	requests := make([]promptRequest, len(inputs))
 	for i, in := range inputs {
 		prompt, err := in.prompt()
 		if err != nil {
 			return nil, fmt.Errorf("build prompt for input %d: %w", i, err)
 		}
-		prompts[i] = prompt
+		dim, err := ResolveDim(in.Dim)
+		if err != nil {
+			return nil, fmt.Errorf("input %d: %w", i, err)
+		}
+		requests[i] = promptRequest{prompt: prompt, dim: dim}
 	}
 
-	return r.embedPrompts(ctx, prompts)
+	return r.embedPrompts(ctx, requests)
 }
 
 func (r *embedRuntime) EmbedSingleInput(ctx context.Context, input EmbedInput) ([]float32, error) {
@@ -193,11 +199,16 @@ func (r *embedRuntime) EmbedSingleInput(ctx context.Context, input EmbedInput) (
 		return nil, err
 	}
 
-	return r.embedPrompt(prompt)
+	dim, err := ResolveDim(input.Dim)
+	if err != nil {
+		return nil, err
+	}
+
+	return r.embedPrompt(prompt, dim)
 }
 
 // embedSingle is the internal implementation
-func (r *embedRuntime) embedPrompt(text string) ([]float32, error) {
+func (r *embedRuntime) embedPrompt(text string, dim int) ([]float32, error) {
 	// Tokenize
 	tokenIDs, err := r.model.Tokenizer().Encode(text)
 	if err != nil {
@@ -210,7 +221,7 @@ func (r *embedRuntime) embedPrompt(text string) ([]float32, error) {
 	}
 
 	// Forward pass
-	embedding, err := r.model.Forward(tokenIDs)
+	embedding, err := r.model.ForwardWithDim(tokenIDs, dim)
 	if err != nil {
 		return nil, fmt.Errorf("forward: %w", err)
 	}
@@ -218,29 +229,34 @@ func (r *embedRuntime) embedPrompt(text string) ([]float32, error) {
 	return embedding, nil
 }
 
-func (r *embedRuntime) embedPrompts(ctx context.Context, prompts []string) ([][]float32, error) {
-	if len(prompts) == 0 {
+type promptRequest struct {
+	prompt string
+	dim    int
+}
+
+func (r *embedRuntime) embedPrompts(ctx context.Context, requests []promptRequest) ([][]float32, error) {
+	if len(requests) == 0 {
 		return nil, nil
 	}
 
-	results := make([][]float32, len(prompts))
-	errors := make([]error, len(prompts))
+	results := make([][]float32, len(requests))
+	errors := make([]error, len(requests))
 
 	workers := runtime.NumCPU()
-	if len(prompts) < workers {
-		workers = len(prompts)
+	if len(requests) < workers {
+		workers = len(requests)
 	}
 
-	promptsPerWorker := (len(prompts) + workers - 1) / workers
+	requestsPerWorker := (len(requests) + workers - 1) / workers
 
 	var wg sync.WaitGroup
 	for w := 0; w < workers; w++ {
-		start := w * promptsPerWorker
-		end := start + promptsPerWorker
-		if end > len(prompts) {
-			end = len(prompts)
+		start := w * requestsPerWorker
+		end := start + requestsPerWorker
+		if end > len(requests) {
+			end = len(requests)
 		}
-		if start >= len(prompts) {
+		if start >= len(requests) {
 			break
 		}
 
@@ -256,7 +272,8 @@ func (r *embedRuntime) embedPrompts(ctx context.Context, prompts []string) ([][]
 				default:
 				}
 
-				embedding, err := r.embedPrompt(prompts[i])
+				req := requests[i]
+				embedding, err := r.embedPrompt(req.prompt, req.dim)
 				if err != nil {
 					errors[i] = err
 				} else {

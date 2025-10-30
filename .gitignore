@@ -25,6 +25,11 @@ examples/test-components/test-components
 *.swo
 *~
 
+# Generated evaluation artifacts
+icons.ann
+icons.vec.jsonl
+mteb_results/
+
 # OS files
 .DS_Store
 Thumbs.db

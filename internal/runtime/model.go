@@ -104,6 +104,8 @@ type modelWorkspace struct {
 	residual   []float32
 	hiddenINT8 kernels.QuantizedTensorINT8
 
+	pooled []float32
+
 	attention attentionWorkspace
 	mlp       mlpWorkspace
 }
@@ -651,8 +653,17 @@ func (m *Model) tensorToFloat32(desc *gguf.TensorDesc, data []byte) ([]float32, 
 // Forward performs a forward pass to generate embeddings
 // Uses INT8 quantized inference for minimal memory footprint
 func (m *Model) Forward(tokenIDs []int) ([]float32, error) {
+	return m.ForwardWithDim(tokenIDs, m.config.EmbedDim)
+}
+
+// ForwardWithDim generates embeddings truncated to targetDim dimensions.
+// targetDim must be >0 and ≤ model EmbedDim.
+func (m *Model) ForwardWithDim(tokenIDs []int, targetDim int) ([]float32, error) {
+	if targetDim <= 0 || targetDim > m.config.EmbedDim {
+		return nil, fmt.Errorf("target dimension %d out of range (1..%d)", targetDim, m.config.EmbedDim)
+	}
 	// Delegate to INT8 path for zero-copy memory efficiency
-	return m.ForwardINT8(tokenIDs)
+	return m.forwardINT8WithDim(tokenIDs, targetDim)
 
 	/* FP32 path disabled to minimize memory (was ~800MB, now ~320MB)
 	seqLen := len(tokenIDs)

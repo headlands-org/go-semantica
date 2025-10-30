@@ -1,3 +1,4 @@
+//go:build integration
 // +build integration
 
 package runtime
@@ -48,6 +49,19 @@ func TestINT8Accuracy(t *testing.T) {
 	t.Logf("INT8 first 10: %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f",
 		embINT8[0], embINT8[1], embINT8[2], embINT8[3], embINT8[4],
 		embINT8[5], embINT8[6], embINT8[7], embINT8[8], embINT8[9])
+
+	// Verify truncated inference path
+	emb128, err := model.ForwardWithDim(tokenIDs, 128)
+	if err != nil {
+		t.Fatalf("ForwardWithDim failed: %v", err)
+	}
+	if len(emb128) != 128 {
+		t.Fatalf("Expected 128-dim embedding, got %d", len(emb128))
+	}
+	norm128 := cosineSimilarity(emb128, emb128)
+	if norm128 < 0.99 || norm128 > 1.01 {
+		t.Fatalf("Expected normalized 128-dim embedding, got norm %.4f", norm128)
+	}
 
 	// Compare embeddings
 	if len(embFP32) != len(embINT8) {

@@ -32,6 +32,7 @@ var (
 	cpuProfile   = flag.String("cpuprofile", "", "Write CPU profile to file")
 	blockProfile = flag.String("blockprofile", "", "Write blocking profile to file")
 	mutexProfile = flag.String("mutexprofile", "", "Write mutex contention profile to file")
+	embedDim     = flag.Int("dim", ggufembed.DefaultEmbedDim, "Embedding dimension (768, 512, 256, 128)")
 )
 
 // Test documents for the 5-scenario benchmark matrix
@@ -113,6 +114,12 @@ func main() {
 	// Duration is required for batch and isolated modes, but not comprehensive or single
 	if (*mode == "batch" || *mode == "isolated") && *duration <= 0 {
 		fmt.Fprintf(os.Stderr, "Error: -duration must be greater than 0 for batch/isolated modes\n\n")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	if _, err := ggufembed.ResolveDim(*embedDim); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n\n", err)
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -313,6 +320,7 @@ func runBatchMode(rt ggufembed.Runtime) (int, time.Duration, time.Duration) {
 			inputs[i] = ggufembed.EmbedInput{
 				Task:    ggufembed.TaskNone,
 				Content: testTexts[rand.Intn(len(testTexts))],
+				Dim:     *embedDim,
 			}
 		}
 
@@ -416,6 +424,7 @@ func worker(ctx context.Context, workerID int, wg *sync.WaitGroup, results chan<
 		_, err := rt.EmbedSingleInput(ctx, ggufembed.EmbedInput{
 			Task:    ggufembed.TaskNone,
 			Content: text,
+			Dim:     *embedDim,
 		})
 		if err != nil {
 			// Check if error is due to context cancellation
@@ -536,6 +545,7 @@ func documentInput(content string) ggufembed.EmbedInput {
 	return ggufembed.EmbedInput{
 		Task:    ggufembed.TaskNone,
 		Content: content,
+		Dim:     *embedDim,
 	}
 }
 

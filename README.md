@@ -23,6 +23,7 @@ defer rt.Close()
 embedding, err := rt.EmbedSingleInput(ctx, ggufembed.EmbedInput{
     Task:    ggufembed.TaskSearchQuery,
     Content: "Hello, world!",
+    Dim:     ggufembed.DefaultEmbedDim, // 512 by default (supports 768/512/256/128)
 })
 
 // Supported tasks (per the EmbeddingGemma model card):
@@ -35,6 +36,9 @@ embedding, err := rt.EmbedSingleInput(ctx, ggufembed.EmbedInput{
 //   TaskSemanticSimilarity -> "task: sentence similarity | query: ..."
 //   TaskCodeRetrieval      -> "task: code retrieval | query: ..."
 //   TaskNone               -> leaves the content unchanged.
+//
+// Supported embedding dimensions (Matryoshka tiers): 768, 512, 256, 128.
+// Passing Dim=0 selects ggufembed.DefaultEmbedDim (512).
 if err != nil {
     log.Fatal(err)
 }
@@ -87,6 +91,7 @@ Idle footprint remains ~54 MB heap for pure Go vs. ~356 MB RSS for llama.cpp
 - Build: `go build ./...`
 - Tests: `go test ./...`
 - Benchmarks: `go test -bench=. ./internal/runtime`
+- MTEB evaluation: `go build -o bin/gemma-embed ./cmd/gemma-embed` then `pip install mteb` and run `./scripts/run_mteb.py --model model/embeddinggemma-300m-Q8_0.gguf`
 
 Use `AGENTS.md` for contribution guidelines. For search and edits during development, repository scripts assume `rg` and `apply_patch` workflows.
 

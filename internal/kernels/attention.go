@@ -415,22 +415,31 @@ func CLSPooling(dst, src []float32, seqLen, embDim int) {
 
 // MeanPooling computes mean pooling over sequence
 func MeanPooling(dst, src []float32, seqLen, embDim int) {
+	MeanPoolingPartial(dst, src, seqLen, embDim, embDim)
+}
+
+// MeanPoolingPartial pools only the first outDim dimensions.
+// dst must have length >= outDim.
+func MeanPoolingPartial(dst, src []float32, seqLen, embDim, outDim int) {
+	if outDim > embDim {
+		outDim = embDim
+	}
 	// Zero output
-	for i := 0; i < embDim; i++ {
+	for i := 0; i < outDim; i++ {
 		dst[i] = 0
 	}
 
 	// Sum
 	for s := 0; s < seqLen; s++ {
 		offset := s * embDim
-		for i := 0; i < embDim; i++ {
+		for i := 0; i < outDim; i++ {
 			dst[i] += src[offset+i]
 		}
 	}
 
 	// Average
 	scale := 1.0 / float32(seqLen)
-	for i := 0; i < embDim; i++ {
+	for i := 0; i < outDim; i++ {
 		dst[i] *= scale
 	}
 }

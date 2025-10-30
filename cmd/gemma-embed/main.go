@@ -13,6 +13,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/lth/pure-go-llamas/pkg/ggufembed"
@@ -25,6 +26,8 @@ var (
 	format     = flag.String("format", "json", "Output format: json, csv, tsv")
 	threads    = flag.Int("threads", runtime.NumCPU(), "Number of threads")
 	batchSize  = flag.Int("batch", 1, "Batch size for processing")
+	embedDim   = flag.Int("dim", ggufembed.DefaultEmbedDim, "Embedding dimension (768, 512, 256, 128)")
+	taskName   = flag.String("task", "search_query", "Prompt to apply (search_query, semantic_similarity, search_document, question_answering, fact_verification, classification, clustering, code_retrieval, none)")
 	verbose    = flag.Bool("verbose", false, "Verbose logging")
 	showStats  = flag.Bool("stats", false, "Show performance statistics")
 )
@@ -103,10 +106,28 @@ func main() {
 		log.Printf("Processing %d texts...", len(texts))
 	}
 
+	task, err := parseTask(*taskName)
+	if err != nil {
+		log.Fatalf("Invalid task %q: %v", *taskName, err)
+	}
+
+	if task == ggufembed.TaskSearchDocument {
+		log.Printf("Warning: task search_document expects title+text input; only content lines provided")
+	}
+
+	inputs := make([]ggufembed.EmbedInput, len(texts))
+	for i, text := range texts {
+		inputs[i] = ggufembed.EmbedInput{
+			Task:    task,
+			Content: text,
+			Dim:     *embedDim,
+		}
+	}
+
 	// Generate embeddings
 	startEmbed := time.Now()
 	ctx := context.Background()
-	embeddings, err := rt.Embed(ctx, texts)
+	embeddings, err := rt.EmbedInputs(ctx, inputs)
 	if err != nil {
 		log.Fatalf("Failed to generate embeddings: %v", err)
 	}
@@ -157,6 +178,31 @@ func writeJSON(w io.Writer, texts []string, embeddings [][]float32) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(results)
+}
+
+func parseTask(name string) (ggufembed.Task, error) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "search_query", "query", "search":
+		return ggufembed.TaskSearchQuery, nil
+	case "semantic_similarity", "similarity", "sentence_similarity":
+		return ggufembed.TaskSemanticSimilarity, nil
+	case "search_document", "document":
+		return ggufembed.TaskSearchDocument, nil
+	case "question_answering", "qa":
+		return ggufembed.TaskQuestionAnswering, nil
+	case "fact_verification", "fact":
+		return ggufembed.TaskFactVerification, nil
+	case "classification", "classify":
+		return ggufembed.TaskClassification, nil
+	case "clustering", "cluster":
+		return ggufembed.TaskClustering, nil
+	case "code_retrieval", "code":
+		return ggufembed.TaskCodeRetrieval, nil
+	case "none", "raw":
+		return ggufembed.TaskNone, nil
+	default:
+		return 0, fmt.Errorf("unknown task")
+	}
 }
 
 func writeCSV(w io.Writer, texts []string, embeddings [][]float32, delimiter rune) error {
