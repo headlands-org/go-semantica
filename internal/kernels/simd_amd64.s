@@ -2,6 +2,19 @@
 
 #include "textflag.h"
 
+// Precomputed constants for AVX512 VNNI inner loop
+DATA ·vnniSignMask+0(SB)/8, $0x8080808080808080
+DATA ·vnniSignMask+8(SB)/8, $0x8080808080808080
+DATA ·vnniSignMask+16(SB)/8, $0x8080808080808080
+DATA ·vnniSignMask+24(SB)/8, $0x8080808080808080
+GLOBL ·vnniSignMask(SB), RODATA|NOPTR, $32
+
+DATA ·vnniOnes+0(SB)/8, $0x0101010101010101
+DATA ·vnniOnes+8(SB)/8, $0x0101010101010101
+DATA ·vnniOnes+16(SB)/8, $0x0101010101010101
+DATA ·vnniOnes+24(SB)/8, $0x0101010101010101
+GLOBL ·vnniOnes(SB), RODATA|NOPTR, $32
+
 // func dotProductAVX2Asm(a, b *float32, n int) float32
 TEXT ·dotProductAVX2Asm(SB), NOSPLIT, $0-28
     // Load pointers and length
@@ -219,6 +232,73 @@ done_matmul:
     VHADDPS X0, X0, X0              // Horizontal add again
 
     // Return result
+    VMOVSS X0, ret+32(FP)
+    VZEROUPPER
+    RET
+
+// func matmulInnerLoopVNNIAsm(inputRow *int8, weightData *byte, scales *float32, numBlocks int) float32
+// Uses AVX512 VNNI (VPDPBUSD) with zero-point correction to avoid scalar fallbacks.
+TEXT ·matmulInnerLoopVNNIAsm(SB), NOSPLIT, $0-36
+    MOVQ    inputRow+0(FP), SI      // SI = input pointer
+    MOVQ    weightData+8(FP), DI    // DI = weight data pointer
+    MOVQ    scales+16(FP), R8       // R8 = scales pointer
+    MOVQ    numBlocks+24(FP), CX    // CX = number of blocks
+
+    // Load sign-bit mask (0x80) and ones constants for unsigned conversion / sum
+    LEAQ    ·vnniSignMask(SB), R9
+    VMOVDQU8 (R9), Y8               // Y8 = 0x80 mask
+    LEAQ    ·vnniOnes(SB), R10
+    VMOVDQU8 (R10), Y9              // Y9 = vector of uint8(1)
+
+    VXORPS  Y0, Y0, Y0              // Y0 = float32 accumulator
+
+    XORQ    BX, BX                  // BX = block index
+
+vnni_block_loop:
+    CMPQ    BX, CX
+    JGE     vnni_done
+
+    // Broadcast scale
+    MOVQ    BX, R11
+    SHLQ    $2, R11
+    VBROADCASTSS (R8)(R11*1), Y1    // Y1 = scale
+
+    // Compute input pointer: inputRow + blockIdx * 32
+    MOVQ    BX, R12
+    SHLQ    $5, R12
+    LEAQ    (SI)(R12*1), R13        // R13 = input ptr
+
+    // Compute weight pointer: weightData + blockIdx * 34 + 2 (skip f16 scale)
+    MOVQ    BX, R14
+    IMULQ   $34, R14
+    LEAQ    2(DI)(R14*1), R15       // R15 = weight ptr
+
+    VMOVDQU8 (R13), Y2              // Y2 = 32 × int8 input
+    VMOVDQU8 (R15), Y3              // Y3 = 32 × int8 weight
+
+    VPXORD  Y8, Y3, Y4              // Y4 = weight converted to unsigned (w + 128)
+
+    VPXORD  Y5, Y5, Y5              // Y5 = 0 accumulator for dot
+    VPDPBUSD Y2, Y4, Y5             // Y5 += (w + 128) * input
+
+    VPXORD  Y6, Y6, Y6              // Y6 = 0 accumulator for input sums
+    VPDPBUSD Y2, Y9, Y6             // Y6 += 1 * input = sum(input)
+
+    VPSLLD  $7, Y6, Y6              // Multiply sum(input) by 128
+    VPSUBD  Y6, Y5, Y5              // Correct the zero-point offset
+
+    VCVTDQ2PS Y5, Y11               // Convert to float
+    VFMADD231PS Y11, Y1, Y0         // Accumulate scaled contribution
+
+    INCQ    BX
+    JMP     vnni_block_loop
+
+vnni_done:
+    VEXTRACTF128 $1, Y0, X1
+    VADDPS X0, X1, X0
+    VHADDPS X0, X0, X0
+    VHADDPS X0, X0, X0
+
     VMOVSS X0, ret+32(FP)
     VZEROUPPER
     RET

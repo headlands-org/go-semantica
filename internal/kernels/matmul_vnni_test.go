@@ -52,7 +52,8 @@ func TestMatmulInnerLoopVNNIMatchesBaseline(t *testing.T) {
 		want := matmulInnerLoopAsm(&inputBytes[0], &weightBytes[0], &scales[0], blocks)
 
 		if !almostEqual(got, want, 1e-3) {
-			t.Fatalf("blocks=%d: vnni=%.6f baseline=%.6f diff=%.6f", blocks, got, want, math.Abs(float64(got-want)))
+			t.Fatalf("blocks=%d: vnni=%.6f baseline=%.6f diff=%.6f input=%v weights=%v scale=%.6f",
+				blocks, got, want, math.Abs(float64(got-want)), inputBytes, weightBytes[2:], scales[0])
 		}
 	}
 }
