@@ -1,16 +1,27 @@
-# Pure-Go GGUF Runtime
+# Pure-Go Gemma Embedding & Search Stack
 
-This repository contains a Go runtime for GGUF embedding models, focused on the Gemma 300M INT8 embedding variant. The code compiles with the standard Go toolchain (no cgo) and can load models either from disk or directly from embedded byte slices.
+`pure-go-llamas` is a batteries-included, CPU-only embedding stack written in Go. It ships with:
+
+- **EmbeddingGemma 300M** bundled via `go:embed`, so binaries can carry the model with no external files.
+- **A pure Go GGUF runtime** tuned for multi-core CPUs (no cgo, no GPU dependencies).
+- **Turn-key vector search**: quantized brute-force indexes, a pure-Go Annoy implementation, and an examples/search app that ties everything together.
+- A growing roadmap—HNSW is next—to cover larger recall-sensitive deployments.
+
+If your corpus fits in RAM (think ≤ 10 K rows), you can embed, index, and search entirely in-process: one binary, one CPU, zero services.
 
 ## Project Layout
 - `pkg/ggufembed`: Public API for loading models and generating embeddings.
 - `model/`: Helper that embeds `embeddinggemma-300m-Q8_0.gguf` via `go:embed` for self-contained binaries.
+- `search/`: Shared search interfaces (`Builder`, `Index`, `Serializer`).
+- `search/annoy`: Pure-Go Annoy builder/index/serializer.
+- `search/brute`: Quantized brute-force index with int8/int16/fp32 storage and zero-copy loading.
 - `internal/gguf`: GGUF reader implementation that supports both mmap and in-memory data.
 - `internal/runtime`: Execution engine, kernels, and tokenizer integration.
-- `cmd/` and `examples/`: CLI utilities and sample programs that exercise the runtime.
+- `cmd/` and `examples/`: CLI utilities and sample programs (see `examples/search` for the end-to-end search demo).
 - `testdata/` and `scripts/`: Reference artifacts, comparison tools, and benchmark helpers.
 
 ## Getting Started
+### Embedding in Go
 ```go
 import "github.com/lth/pure-go-llamas/pkg/ggufembed"
 
@@ -51,7 +62,48 @@ import "github.com/lth/pure-go-llamas/model"
 rt, _ := model.Open() // loads the embedded Gemma weights straight from memory
 ```
 
-## Performance vs. llama.cpp
+### Search quick start
+
+```
+go run ./examples/search \
+  -icons ../one/go/hugeicons/icons.json \
+  -dim 256 \
+  -quant int8 \
+  -query "Save parking spot with location and notes"
+```
+
+The example embeds the dataset (batching 128 at a time), builds both Annoy and brute-force indexes, writes them to disk (`icons.brute.<dim>.<quant>.idx`), and loads whichever files already exist. Each run prints index sizes, load/build timings, and the top-10 matches—with distance first so you can skim the results—and you can flip `-dim`/`-quant` to explore recall vs. footprint trade-offs.
+
+### Small-data deployment recipe
+
+For a few thousand documents (≈ 8 K icons in the demo):
+
+1. Run the example once during build or release packaging to precompute `*.idx` files for your preferred Matryoshka tier(s) and quantization.
+2. Embed the GGUF model (`model.Open`) **and** the brute-force index (`//go:embed`) into your application binary.
+3. At startup, call `search/brute.Serializer.Deserialize` on the embedded bytes; the runtime keeps the vectors in a flat slice for efficient mmap or in-memory use.
+4. Use `pkg/ggufembed` to embed user queries on demand and call `Index.SearchVector`—no external services, queues, or GPUs required.
+
+Annoy is available alongside brute force for larger corpora today, and HNSW support is planned to cover higher-recall scenarios without sacrificing latency.
+
+## Quantized brute-force trade-offs
+
+We benchmarked 500 random queries against the Hugeicons dataset (4 495 items). Each row compares a quantized brute index against the 768-dim fp32 baseline: the table lists on-disk size, average search latency, and recall@10 relative to the fp32 index.
+
+| Dim | Quant | Index Size | Avg Search (ms) | Recall vs 768 fp32 | Recall Loss |
+|-----|-------|------------|-----------------|--------------------|-------------|
+| 768 | fp32  | 13.2 MB    | 2.34            | 100.00 %           | 0.00 %      |
+| 768 | int16 | 6.6 MB     | 2.50            | 99.98 %            | 0.02 %      |
+| 768 | int8  | 3.3 MB     | 2.52            | 95.04 %            | 4.96 %      |
+| 512 | int16 | 4.4 MB     | 1.83            | 89.18 %            | 10.82 %     |
+| 512 | int8  | 2.2 MB     | 1.85            | 88.32 %            | 11.68 %     |
+| 256 | int16 | 2.2 MB     | 1.15            | 78.20 %            | 21.80 %     |
+| 256 | int8  | 1.1 MB     | 1.15            | 77.76 %            | 22.24 %     |
+| 128 | int16 | 1.1 MB     | 0.79            | 66.46 %            | 33.54 %     |
+| 128 | int8  | 0.57 MB    | 0.79            | 66.40 %            | 33.60 %     |
+
+All measurements were captured with `go run ./examples/search` (building binaries ahead of time and reusing the cached indexes). The brute-force index stores pre-normalised vectors, so search time scales linearly with dimensionality while quantization controls disk/RAM footprint.
+
+## Runtime performance vs. llama.cpp
 
 ### Linux (Ryzen 9 7900, x86_64)
 Benchmarks collected on Arch Linux with `embeddinggemma-300m-Q8_0.gguf`. The Go CLI reports wall-clock and combined CPU time (user + sys); the C++ harness now accepts `-threads` (default `2×` logical cores) so llama.cpp can scale beyond its baked-in `GGML_DEFAULT_N_THREADS = 4`. Effective core count is simply `CPU ÷ wall`.
