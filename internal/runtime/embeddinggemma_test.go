@@ -1,10 +1,10 @@
+//go:build integration
 // +build integration
 
 package runtime
 
 import (
 	"fmt"
-	"math"
 	"strings"
 	"testing"
 
@@ -270,26 +270,4 @@ func abs(x float32) float32 {
 		return -x
 	}
 	return x
-}
-
-func cosineSimilarity(a, b []float32) float32 {
-	if len(a) != len(b) {
-		return 0
-	}
-
-	var dotProduct, normA, normB float32
-	for i := range a {
-		dotProduct += a[i] * b[i]
-		normA += a[i] * a[i]
-		normB += b[i] * b[i]
-	}
-
-	normA = float32(math.Sqrt(float64(normA)))
-	normB = float32(math.Sqrt(float64(normB)))
-
-	if normA == 0 || normB == 0 {
-		return 0
-	}
-
-	return dotProduct / (normA * normB)
 }
