@@ -81,6 +81,17 @@ var int16ToFloat32 = func() [65536]float32 {
 }()
 
 func dotInt8(vec []int8, query []float32, dim int) float32 {
+	sum := float32(0)
+	if hasAVX2 && dim >= 8 {
+		n := dim &^ 7
+		if n > 0 {
+			sum += dotInt8AVX2(&vec[0], &query[0], n)
+			vec = vec[n:]
+			query = query[n:]
+			dim -= n
+		}
+	}
+
 	sum0, sum1, sum2, sum3 := float32(0), float32(0), float32(0), float32(0)
 	i := 0
 	for ; i+4 <= dim; i += 4 {
@@ -89,7 +100,7 @@ func dotInt8(vec []int8, query []float32, dim int) float32 {
 		sum2 += query[i+2] * int8ToFloat32[uint8(vec[i+2])]
 		sum3 += query[i+3] * int8ToFloat32[uint8(vec[i+3])]
 	}
-	sum := sum0 + sum1 + sum2 + sum3
+	sum += sum0 + sum1 + sum2 + sum3
 	for ; i < dim; i++ {
 		sum += query[i] * int8ToFloat32[uint8(vec[i])]
 	}
@@ -97,6 +108,17 @@ func dotInt8(vec []int8, query []float32, dim int) float32 {
 }
 
 func dotInt16(vec []int16, query []float32, dim int) float32 {
+	sum := float32(0)
+	if hasAVX2 && dim >= 8 {
+		n := dim &^ 7
+		if n > 0 {
+			sum += dotInt16AVX2(&vec[0], &query[0], n)
+			vec = vec[n:]
+			query = query[n:]
+			dim -= n
+		}
+	}
+
 	sum0, sum1, sum2, sum3 := float32(0), float32(0), float32(0), float32(0)
 	i := 0
 	for ; i+4 <= dim; i += 4 {
@@ -105,7 +127,7 @@ func dotInt16(vec []int16, query []float32, dim int) float32 {
 		sum2 += query[i+2] * int16ToFloat32[uint16(vec[i+2])]
 		sum3 += query[i+3] * int16ToFloat32[uint16(vec[i+3])]
 	}
-	sum := sum0 + sum1 + sum2 + sum3
+	sum += sum0 + sum1 + sum2 + sum3
 	for ; i < dim; i++ {
 		sum += query[i] * int16ToFloat32[uint16(vec[i])]
 	}
