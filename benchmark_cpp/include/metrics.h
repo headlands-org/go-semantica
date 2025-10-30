@@ -71,6 +71,9 @@ public:
     // Get average latency per item (milliseconds)
     double getAvgLatencyMs() const;
 
+    // Get total CPU time consumed between start and stop (seconds)
+    double getCpuSeconds() const;
+
     // Reset counter
     void reset();
 
@@ -80,6 +83,8 @@ private:
     int count_;
     bool started_;
     bool stopped_;
+    double cpu_start_seconds_;
+    double cpu_end_seconds_;
 };
 
 // MemoryStats measures RSS (Resident Set Size) memory usage
@@ -113,9 +118,11 @@ public:
     static void printBenchmarkResults(
         const std::string& mode,
         double duration_seconds,
+        double compute_seconds,
         int total_embeddings,
         double throughput,
-        double avg_latency_ms
+        double avg_latency_ms,
+        double avg_compute_ms
     );
 
     // Format per-worker statistics for isolated mode
@@ -146,6 +153,10 @@ public:
         double p50;
         double p95;
         double p99;
+        double compute_mean;
+        double compute_p50;
+        double compute_p95;
+        double compute_p99;
     };
 
     struct ThroughputStats {
@@ -153,6 +164,8 @@ public:
         double peak_memory_mb;
         double duration;
         int total_embeddings;
+        double compute_seconds;
+        double compute_per_ms;
     };
 
     static void printComprehensiveResults(
@@ -160,6 +173,7 @@ public:
         double idle_mem_mb,
         const LatencyStats& short_latency,
         const LatencyStats& long_latency,
+        const LatencyStats& extra_long_latency,
         const ThroughputStats& short_throughput,
         const ThroughputStats& long_throughput
     );
@@ -170,6 +184,9 @@ std::string detectCPU();
 int detectCores();
 std::string detectOS();
 std::string detectArch();
+
+// CPU time helper (seconds of user+system time consumed by current process)
+double getProcessCpuTimeSeconds();
 
 } // namespace metrics
 

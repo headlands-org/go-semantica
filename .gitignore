@@ -5,6 +5,8 @@ gemma-embed
 gguf-inspect
 simple
 test
+/benchmark
+/benchmark-baseline
 /similarity
 /similarity-embedded
 /batch

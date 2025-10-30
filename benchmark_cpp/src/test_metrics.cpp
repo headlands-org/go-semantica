@@ -86,9 +86,11 @@ void testOutputFormatter() {
     OutputFormatter::printBenchmarkResults(
         "batch",
         2.126906174,
+        3.456,
         192,
         90.27,
-        11.077636
+        11.077636,
+        8.001
     );
 
     // Test worker stats output
@@ -109,21 +111,26 @@ void testComprehensiveOutput() {
     platform.os = "linux";
     platform.arch = "amd64";
 
-    OutputFormatter::LatencyStats short_latency = {17.2, 17.5, 18.3, 19.1};
-    OutputFormatter::LatencyStats long_latency = {52.8, 53.2, 55.1, 56.3};
+    OutputFormatter::LatencyStats short_latency = {17.2, 17.5, 18.3, 19.1, 11.4, 11.6, 12.0, 12.5};
+    OutputFormatter::LatencyStats long_latency = {52.8, 53.2, 55.1, 56.3, 41.2, 41.8, 43.5, 44.1};
+    OutputFormatter::LatencyStats extra_latency = {920.4, 921.8, 925.1, 930.7, 870.2, 871.5, 875.0, 880.3};
 
     OutputFormatter::ThroughputStats short_throughput = {
         90.3,   // throughput
         125.5,  // peak_memory_mb
         20.0,   // duration
-        1806    // total_embeddings
+        1806,   // total_embeddings
+        14.7,   // compute_seconds
+        8.1     // compute_per_ms
     };
 
     OutputFormatter::ThroughputStats long_throughput = {
         29.7,   // throughput
         132.8,  // peak_memory_mb
         20.0,   // duration
-        594     // total_embeddings
+        594,    // total_embeddings
+        12.4,   // compute_seconds
+        20.8    // compute_per_ms
     };
 
     OutputFormatter::printComprehensiveResults(
@@ -131,6 +138,7 @@ void testComprehensiveOutput() {
         118.0,  // idle_mem_mb
         short_latency,
         long_latency,
+        extra_latency,
         short_throughput,
         long_throughput
     );

@@ -7,6 +7,7 @@
 #include <fstream>
 #include <sstream>
 #include <thread>
+#include <ctime>
 
 #ifdef __linux__
 #include <unistd.h>
@@ -18,6 +19,14 @@
 #endif
 
 namespace metrics {
+
+double getProcessCpuTimeSeconds() {
+    clock_t ticks = std::clock();
+    if (ticks == static_cast<clock_t>(-1)) {
+        return 0.0;
+    }
+    return static_cast<double>(ticks) / static_cast<double>(CLOCKS_PER_SEC);
+}
 
 // ============================================================================
 // LatencyTracker Implementation
@@ -81,17 +90,20 @@ void LatencyTracker::clear() {
 // ============================================================================
 
 ThroughputCounter::ThroughputCounter()
-    : count_(0), started_(false), stopped_(false) {}
+    : count_(0), started_(false), stopped_(false), cpu_start_seconds_(0.0), cpu_end_seconds_(0.0) {}
 
 void ThroughputCounter::start() {
     start_time_ = std::chrono::high_resolution_clock::now();
     started_ = true;
     stopped_ = false;
+    cpu_start_seconds_ = getProcessCpuTimeSeconds();
+    cpu_end_seconds_ = cpu_start_seconds_;
 }
 
 void ThroughputCounter::stop() {
     end_time_ = std::chrono::high_resolution_clock::now();
     stopped_ = true;
+    cpu_end_seconds_ = getProcessCpuTimeSeconds();
 }
 
 void ThroughputCounter::increment(int count) {
@@ -124,10 +136,24 @@ double ThroughputCounter::getAvgLatencyMs() const {
     return (duration * 1000.0) / count_;
 }
 
+double ThroughputCounter::getCpuSeconds() const {
+    if (!started_) {
+        return 0.0;
+    }
+    double end = stopped_ ? cpu_end_seconds_ : getProcessCpuTimeSeconds();
+    double diff = end - cpu_start_seconds_;
+    if (diff < 0.0) {
+        return 0.0;
+    }
+    return diff;
+}
+
 void ThroughputCounter::reset() {
     count_ = 0;
     started_ = false;
     stopped_ = false;
+    cpu_start_seconds_ = 0.0;
+    cpu_end_seconds_ = 0.0;
 }
 
 // ============================================================================
@@ -198,19 +224,23 @@ uint64_t MemoryStats::parseRssMacOS() const {
 void OutputFormatter::printBenchmarkResults(
     const std::string& mode,
     double duration_seconds,
+    double compute_seconds,
     int total_embeddings,
     double throughput,
-    double avg_latency_ms)
+    double avg_latency_ms,
+    double avg_compute_ms)
 {
     std::cerr << "\n=== Benchmark Results ===\n";
     std::cerr << "Mode: " << mode << "\n";
     std::cerr << std::fixed << std::setprecision(9);
     std::cerr << "Duration: " << duration_seconds << "s\n";
+    std::cerr << "Compute time: " << compute_seconds << "s\n";
     std::cerr << "Total embeddings: " << total_embeddings << "\n";
     std::cerr << std::fixed << std::setprecision(2);
     std::cerr << "Throughput: " << throughput << " embeddings/sec\n";
     std::cerr << std::fixed << std::setprecision(6);
     std::cerr << "Average latency: " << avg_latency_ms << "ms per embedding\n";
+    std::cerr << "Average compute: " << avg_compute_ms << "ms per embedding\n";
 }
 
 void OutputFormatter::printWorkerStats(
@@ -244,6 +274,7 @@ void OutputFormatter::printComprehensiveResults(
     double idle_mem_mb,
     const LatencyStats& short_latency,
     const LatencyStats& long_latency,
+    const LatencyStats& extra_long_latency,
     const ThroughputStats& short_throughput,
     const ThroughputStats& long_throughput)
 {
@@ -279,6 +310,18 @@ void OutputFormatter::printComprehensiveResults(
               << std::setw(20) << "P99 Latency"
               << std::setw(12) << std::fixed << std::setprecision(1) << short_latency.p99
               << "ms\n";
+    std::cout << std::left << std::setw(32) << ""
+              << std::setw(20) << "CPU P50"
+              << std::setw(12) << std::fixed << std::setprecision(1) << short_latency.compute_p50
+              << "ms\n";
+    std::cout << std::left << std::setw(32) << ""
+              << std::setw(20) << "CPU P95"
+              << std::setw(12) << std::fixed << std::setprecision(1) << short_latency.compute_p95
+              << "ms\n";
+    std::cout << std::left << std::setw(32) << ""
+              << std::setw(20) << "CPU P99"
+              << std::setw(12) << std::fixed << std::setprecision(1) << short_latency.compute_p99
+              << "ms\n";
     std::cout << "\n";
 
     // Scenario 3: Single Long Doc (49w)
@@ -294,9 +337,48 @@ void OutputFormatter::printComprehensiveResults(
               << std::setw(20) << "P99 Latency"
               << std::setw(12) << std::fixed << std::setprecision(1) << long_latency.p99
               << "ms\n";
+    std::cout << std::left << std::setw(32) << ""
+              << std::setw(20) << "CPU P50"
+              << std::setw(12) << std::fixed << std::setprecision(1) << long_latency.compute_p50
+              << "ms\n";
+    std::cout << std::left << std::setw(32) << ""
+              << std::setw(20) << "CPU P95"
+              << std::setw(12) << std::fixed << std::setprecision(1) << long_latency.compute_p95
+              << "ms\n";
+    std::cout << std::left << std::setw(32) << ""
+              << std::setw(20) << "CPU P99"
+              << std::setw(12) << std::fixed << std::setprecision(1) << long_latency.compute_p99
+              << "ms\n";
     std::cout << "\n";
 
-    // Scenario 4: Batch Short Docs (96x)
+    // Scenario 4: Single Extra-Long Doc (~400w)
+    std::cout << std::left << std::setw(32) << "Single Extra-Long Doc (~400w)"
+              << std::setw(20) << "P50 Latency"
+              << std::setw(12) << std::fixed << std::setprecision(1) << extra_long_latency.p50
+              << "ms\n";
+    std::cout << std::left << std::setw(32) << ""
+              << std::setw(20) << "P95 Latency"
+              << std::setw(12) << std::fixed << std::setprecision(1) << extra_long_latency.p95
+              << "ms\n";
+    std::cout << std::left << std::setw(32) << ""
+              << std::setw(20) << "P99 Latency"
+              << std::setw(12) << std::fixed << std::setprecision(1) << extra_long_latency.p99
+              << "ms\n";
+    std::cout << std::left << std::setw(32) << ""
+              << std::setw(20) << "CPU P50"
+              << std::setw(12) << std::fixed << std::setprecision(1) << extra_long_latency.compute_p50
+              << "ms\n";
+    std::cout << std::left << std::setw(32) << ""
+              << std::setw(20) << "CPU P95"
+              << std::setw(12) << std::fixed << std::setprecision(1) << extra_long_latency.compute_p95
+              << "ms\n";
+    std::cout << std::left << std::setw(32) << ""
+              << std::setw(20) << "CPU P99"
+              << std::setw(12) << std::fixed << std::setprecision(1) << extra_long_latency.compute_p99
+              << "ms\n";
+    std::cout << "\n";
+
+    // Scenario 5: Batch Short Docs (96x)
     double avg_latency_short = 1000.0 / short_throughput.throughput; // Convert to ms/emb
     std::cout << std::left << std::setw(32) << "Batch Short Docs (96x)"
               << std::setw(20) << "Throughput"
@@ -310,9 +392,17 @@ void OutputFormatter::printComprehensiveResults(
               << std::setw(20) << "Avg Latency"
               << std::setw(12) << std::fixed << std::setprecision(1) << avg_latency_short
               << "ms/emb\n";
+    std::cout << std::left << std::setw(32) << ""
+              << std::setw(20) << "CPU Time"
+              << std::setw(12) << std::fixed << std::setprecision(3) << short_throughput.compute_seconds
+              << "s\n";
+    std::cout << std::left << std::setw(32) << ""
+              << std::setw(20) << "CPU per Embedding"
+              << std::setw(12) << std::fixed << std::setprecision(3) << short_throughput.compute_per_ms
+              << "ms/emb\n";
     std::cout << "\n";
 
-    // Scenario 5: Batch Long Docs (96x)
+    // Scenario 6: Batch Long Docs (96x)
     double avg_latency_long = 1000.0 / long_throughput.throughput; // Convert to ms/emb
     std::cout << std::left << std::setw(32) << "Batch Long Docs (96x)"
               << std::setw(20) << "Throughput"
@@ -325,6 +415,14 @@ void OutputFormatter::printComprehensiveResults(
     std::cout << std::left << std::setw(32) << ""
               << std::setw(20) << "Avg Latency"
               << std::setw(12) << std::fixed << std::setprecision(1) << avg_latency_long
+              << "ms/emb\n";
+    std::cout << std::left << std::setw(32) << ""
+              << std::setw(20) << "CPU Time"
+              << std::setw(12) << std::fixed << std::setprecision(3) << long_throughput.compute_seconds
+              << "s\n";
+    std::cout << std::left << std::setw(32) << ""
+              << std::setw(20) << "CPU per Embedding"
+              << std::setw(12) << std::fixed << std::setprecision(3) << long_throughput.compute_per_ms
               << "ms/emb\n";
 }
 
