@@ -164,23 +164,31 @@ func runSearch(args []string) {
 	loadDur := time.Since(loadStart)
 
 	ctx := context.Background()
+	embedStart := time.Now()
+	vec, err := idx.EmbedQuery(ctx, *query)
+	if err != nil {
+		log.Fatalf("embed query: %v", err)
+	}
+	embedDur := time.Since(embedStart)
+
 	searchStart := time.Now()
-	opts := []annoy.SearchOption{annoy.WithMetadata()}
+	opts := []annoy.SearchOption{}
 	if *searchK > 0 {
 		opts = append(opts, annoy.WithSearchK(*searchK))
 	}
-	results, err := idx.SearchText(ctx, *query, *topK, opts...)
+	results, err := idx.SearchVector(vec, *topK, opts...)
 	if err != nil {
 		log.Fatalf("search: %v", err)
 	}
 	searchDur := time.Since(searchStart)
 
 	fmt.Printf("Loaded index in %s (%d items)\n", loadDur.Truncate(time.Millisecond), len(idx.Items()))
-	fmt.Printf("Search \"%s\" (%d results) in %s\n", *query, len(results), searchDur.Truncate(time.Millisecond))
+	fmt.Printf("Search \"%s\" (%d results) embed=%s search=%s\n",
+		*query, len(results), embedDur.Truncate(time.Millisecond), searchDur.Truncate(time.Millisecond))
 	for i, res := range results {
 		var meta iconMetadata
-		if len(res.Metadata) > 0 {
-			_ = json.Unmarshal(res.Metadata, &meta)
+		if raw, ok := idx.Metadata(res.ID); ok && len(raw) > 0 {
+			_ = json.Unmarshal(raw, &meta)
 		}
 		fmt.Printf("%2d. %-20s dist=%.4f\n", i+1, res.ID, res.Distance)
 		if meta.Title != "" {
@@ -215,16 +223,19 @@ func runBrute(args []string) {
 	}
 
 	ctx := context.Background()
+	embedStart := time.Now()
 	vec, err := idx.EmbedQuery(ctx, *query)
 	if err != nil {
 		log.Fatalf("embed query: %v", err)
 	}
+	embedDur := time.Since(embedStart)
 
 	start := time.Now()
 	results := bruteForce(vec, items, idx.Metric(), "", *topK)
 	elapsed := time.Since(start)
 
-	fmt.Printf("Brute-force search (%d items) took %s\n", len(items), elapsed.Truncate(time.Microsecond))
+	fmt.Printf("Brute-force search (%d items) embed=%s search=%s\n",
+		len(items), embedDur.Truncate(time.Millisecond), elapsed.Truncate(time.Microsecond))
 	for i, res := range results {
 		meta, _ := idx.Metadata(res.ID)
 		var metaStruct iconMetadata
