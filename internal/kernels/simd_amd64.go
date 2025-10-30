@@ -3,7 +3,11 @@
 
 package kernels
 
-import "golang.org/x/sys/cpu"
+import (
+	"unsafe"
+
+	"golang.org/x/sys/cpu"
+)
 
 // SIMD support flags
 var (
@@ -31,21 +35,34 @@ func dotProductINT8VNNI(a, b *int8, n int) int32
 //go:noescape
 func matmulInnerLoopAsm(inputRow *int8, weightData *byte, scales *float32, numBlocks int) float32
 
-//go:noescape
-func matmulInnerLoopVNNIAsm(inputRow *int8, weightData *byte, scales *float32, numBlocks int) float32
-
 type matmulInnerLoopFn func(*int8, *byte, *float32, int) float32
 
 var currentMatmulInnerLoop matmulInnerLoopFn = matmulInnerLoopAsm
 
 func init() {
 	if hasAVX512VNNI {
-		currentMatmulInnerLoop = matmulInnerLoopVNNIAsm
+		currentMatmulInnerLoop = matmulInnerLoopVNNI
 	}
 }
 
 func matmulInnerLoop(inputRow *int8, weightData *byte, scales *float32, numBlocks int) float32 {
 	return currentMatmulInnerLoop(inputRow, weightData, scales, numBlocks)
+}
+
+func matmulInnerLoopVNNI(inputRow *int8, weightData *byte, scales *float32, numBlocks int) float32 {
+	const blockSize = 32
+	const blockBytes = 34
+
+	var acc float32
+	for blockIdx := 0; blockIdx < numBlocks; blockIdx++ {
+		scale := *(*float32)(unsafe.Add(unsafe.Pointer(scales), uintptr(blockIdx)*4))
+		inputPtr := (*int8)(unsafe.Add(unsafe.Pointer(inputRow), uintptr(blockIdx*blockSize)))
+		weightPtr := (*int8)(unsafe.Add(unsafe.Pointer(weightData), uintptr(blockIdx*blockBytes+2)))
+
+		dot := dotProductINT8Asm(inputPtr, weightPtr, blockSize)
+		acc += float32(dot) * scale
+	}
+	return acc
 }
 
 // dotProductINT8Asm is the direct assembly call without dispatcher overhead
