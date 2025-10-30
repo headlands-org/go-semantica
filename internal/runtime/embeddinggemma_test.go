@@ -11,8 +11,6 @@ import (
 	"github.com/lth/pure-go-llamas/internal/gguf"
 )
 
-const gemmaModelPath = "../../model/embeddinggemma-300m-Q8_0.gguf"
-
 // Reference embeddings from llama.cpp for "Hello world"
 // Command: llama-embedding -m embeddinggemma-300m-Q8_0.gguf -p "Hello world" --embd-normalize 2
 var referenceEmbedding = []float32{
