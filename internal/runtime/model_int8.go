@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"math"
+	goruntime "runtime"
 
 	"github.com/lth/pure-go-llamas/internal/gguf"
 	"github.com/lth/pure-go-llamas/internal/kernels"
@@ -186,15 +187,7 @@ func (m *Model) ForwardINT8(tokenIDs []int) ([]float32, error) {
 		copy(residual, hidden)
 
 		// Attention pre-norm (FP32)
-		for i := 0; i < seqLen; i++ {
-			offset := i * embDim
-			kernels.RMSNorm(
-				hidden[offset:offset+embDim],
-				hidden[offset:offset+embDim],
-				layer.attnNormWeight,
-				m.config.NormEps,
-			)
-		}
+		m.applyRMSNormParallel(hidden, layer.attnNormWeight, seqLen, embDim)
 
 		// Quantize hidden state to INT8
 		kernels.QuantizeSymmetricINT8Into(&ws.hiddenINT8, hidden, seqLen, embDim)
@@ -204,15 +197,7 @@ func (m *Model) ForwardINT8(tokenIDs []int) ([]float32, error) {
 
 		// Post-attention norm if present
 		if len(layer.attnPostNormWeight) > 0 {
-			for i := 0; i < seqLen; i++ {
-				offset := i * embDim
-				kernels.RMSNorm(
-					hidden[offset:offset+embDim],
-					hidden[offset:offset+embDim],
-					layer.attnPostNormWeight,
-					m.config.NormEps,
-				)
-			}
+			m.applyRMSNormParallel(hidden, layer.attnPostNormWeight, seqLen, embDim)
 		}
 
 		// Residual connection
@@ -224,15 +209,7 @@ func (m *Model) ForwardINT8(tokenIDs []int) ([]float32, error) {
 		copy(residual, hidden)
 
 		// FFN pre-norm
-		for i := 0; i < seqLen; i++ {
-			offset := i * embDim
-			kernels.RMSNorm(
-				hidden[offset:offset+embDim],
-				hidden[offset:offset+embDim],
-				layer.ffnNormWeight,
-				m.config.NormEps,
-			)
-		}
+		m.applyRMSNormParallel(hidden, layer.ffnNormWeight, seqLen, embDim)
 
 		// Quantize for MLP
 		kernels.QuantizeSymmetricINT8Into(&ws.hiddenINT8, hidden, seqLen, embDim)
@@ -242,15 +219,7 @@ func (m *Model) ForwardINT8(tokenIDs []int) ([]float32, error) {
 
 		// Post-FFN norm if present
 		if len(layer.ffnPostNormWeight) > 0 {
-			for i := 0; i < seqLen; i++ {
-				offset := i * embDim
-				kernels.RMSNorm(
-					hidden[offset:offset+embDim],
-					hidden[offset:offset+embDim],
-					layer.ffnPostNormWeight,
-					m.config.NormEps,
-				)
-			}
+			m.applyRMSNormParallel(hidden, layer.ffnPostNormWeight, seqLen, embDim)
 		}
 
 		// Residual connection
@@ -261,15 +230,7 @@ func (m *Model) ForwardINT8(tokenIDs []int) ([]float32, error) {
 
 	// Final output norm
 	if len(m.outputNormWeight) > 0 {
-		for i := 0; i < seqLen; i++ {
-			offset := i * embDim
-			kernels.RMSNorm(
-				hidden[offset:offset+embDim],
-				hidden[offset:offset+embDim],
-				m.outputNormWeight,
-				m.config.NormEps,
-			)
-		}
+		m.applyRMSNormParallel(hidden, m.outputNormWeight, seqLen, embDim)
 	}
 
 	// Pool to single embedding
@@ -280,6 +241,96 @@ func (m *Model) ForwardINT8(tokenIDs []int) ([]float32, error) {
 	l2Normalize(embedding)
 
 	return embedding, nil
+}
+
+func (m *Model) matMulQ8_0INT8Tiled(dst []float32, weightData []byte, scales []float32, input *kernels.QuantizedTensorINT8, batch, inDim, outDim, tileOut int) {
+	// Adaptive tiling strategy: optimize for single-document latency vs batch throughput
+	// For single documents (batch=1), use aggressive parallelism with larger tiles
+	// For batches (batch≥4), use conservative cache-optimized tiling
+	if tileOut <= 0 {
+		tileOut = outDim
+	}
+
+	// DEBUG: Log parallelization decision
+	// fmt.Printf("DEBUG matMulQ8_0INT8Tiled: batch=%d, inDim=%d, outDim=%d, tileOut=%d, workers=%v\n", batch, inDim, outDim, tileOut, m.workers != nil)
+
+	// Fallback to serial execution if no workers or problem is too small
+	if m.workers == nil || outDim <= tileOut {
+		// fmt.Printf("DEBUG: Using serial execution (workers=%v, outDim=%d, tileOut=%d)\n", m.workers != nil, outDim, tileOut)
+		kernels.MatMulQ8_0INT8(dst, weightData, scales, input, batch, inDim, outDim)
+		return
+	}
+
+	// Adaptive tile size selection based on batch size and problem size
+	var chunk int
+	workerCount := goruntime.GOMAXPROCS(0)
+
+	// For large batches, use the hint directly (cache-optimized)
+	// For single/small batches, use aggressive parallelism
+	if batch >= 8 {
+		// Large batch: use cache-optimized tiling (typically 64-128)
+		chunk = tileOut
+		if chunk > outDim {
+			chunk = outDim
+		}
+	} else if batch >= 4 {
+		// Medium batch: slightly more aggressive than hint
+		chunk = tileOut * 2
+		if chunk > outDim/2 {
+			chunk = outDim / 2
+		}
+		if chunk < 64 {
+			chunk = 64
+		}
+	} else {
+		// Single/small batch: maximize parallelism for low latency
+		chunk = max(64, outDim/workerCount)
+		// Safety bound: prevent tiles that are too large (poor cache behavior)
+		if chunk > 256 {
+			chunk = 256
+		}
+	}
+
+	// Safety bound: prevent tiles that are too small (overhead dominates)
+	if chunk < 32 {
+		chunk = 32
+	}
+
+	// If computed chunk is too large, fall back to serial execution
+	if chunk >= outDim {
+		kernels.MatMulQ8_0INT8(dst, weightData, scales, input, batch, inDim, outDim)
+		return
+	}
+
+	// Zero-initialize output buffer for accumulation
+	total := batch * outDim
+	for i := range dst[:total] {
+		dst[i] = 0
+	}
+
+	// Partition work into tiles and execute in parallel
+	taskCount := (outDim + chunk - 1) / chunk
+	tasks := make([]func(), 0, taskCount)
+	for colStart := 0; colStart < outDim; colStart += chunk {
+		start := colStart
+		end := start + chunk
+		if end > outDim {
+			end = outDim
+		}
+
+		tasks = append(tasks, func() {
+			kernels.MatMulQ8_0INT8Range(dst, weightData, scales, input, batch, inDim, outDim, start, end)
+		})
+	}
+
+	if m.workers == nil || len(tasks) < m.parallelismCfg.MinTileCountForMatmulParallel {
+		for _, task := range tasks {
+			task()
+		}
+		return
+	}
+
+	m.runTasks(tasks...)
 }
 
 // runAttentionINT8 runs attention with INT8 activations
@@ -298,37 +349,94 @@ func (m *Model) runAttentionINT8(ws *modelWorkspace, output []float32, hiddenINT
 	v := ensureFloat32(&attn.v, seqLen*kvDim)
 
 	// Project using INT8 x Q8_0 matmul (raw bytes, zero-copy)
-	kernels.MatMulQ8_0INT8(q, layer.qWeightQ8, layer.qWeightScales, hiddenINT8, seqLen, embDim, embDim)
-	kernels.MatMulQ8_0INT8(k, layer.kWeightQ8, layer.kWeightScales, hiddenINT8, seqLen, embDim, kvDim)
-	kernels.MatMulQ8_0INT8(v, layer.vWeightQ8, layer.vWeightScales, hiddenINT8, seqLen, embDim, kvDim)
+	// Use fixed tile size for good parallelism (don't use HeadDim which may be too large)
+	const tileSizeHint = 64 // Optimal for most models, provides good parallel granularity
+
+	m.matMulQ8_0INT8Tiled(q, layer.qWeightQ8, layer.qWeightScales, hiddenINT8, seqLen, embDim, embDim, tileSizeHint)
+	m.matMulQ8_0INT8Tiled(k, layer.kWeightQ8, layer.kWeightScales, hiddenINT8, seqLen, embDim, kvDim, tileSizeHint)
+	m.matMulQ8_0INT8Tiled(v, layer.vWeightQ8, layer.vWeightScales, hiddenINT8, seqLen, embDim, kvDim, tileSizeHint)
 
 	// Q/K normalization (FP32)
+	// Parallelize across heads when head count >= threshold to amortize task overhead.
+	// Each task processes ~4-8 heads to balance granularity vs dispatch cost.
 	if len(layer.qNormWeight) > 0 {
-		for s := 0; s < seqLen; s++ {
-			for h := 0; h < nHeads; h++ {
-				offset := s*embDim + h*headDim
-				kernels.RMSNorm(q[offset:offset+headDim], q[offset:offset+headDim], layer.qNormWeight, m.config.NormEps)
-			}
+		headsPerTask := 4
+		if nHeads >= 16 {
+			headsPerTask = 8
 		}
-	}
-	if len(layer.kNormWeight) > 0 {
-		for s := 0; s < seqLen; s++ {
-			for h := 0; h < nKVHeads; h++ {
-				offset := s*kvDim + h*headDim
-				kernels.RMSNorm(k[offset:offset+headDim], k[offset:offset+headDim], layer.kNormWeight, m.config.NormEps)
+		taskCount := (nHeads + headsPerTask - 1) / headsPerTask
+		tasks := make([]func(), 0, taskCount)
+
+		for hStart := 0; hStart < nHeads; hStart += headsPerTask {
+			start := hStart
+			end := start + headsPerTask
+			if end > nHeads {
+				end = nHeads
 			}
+
+			tasks = append(tasks, func() {
+				for s := 0; s < seqLen; s++ {
+					for h := start; h < end; h++ {
+						offset := s*embDim + h*headDim
+						kernels.RMSNorm(q[offset:offset+headDim], q[offset:offset+headDim], layer.qNormWeight, m.config.NormEps)
+					}
+				}
+			})
 		}
+
+		// Only parallelize if we have enough heads (adaptive threshold from config)
+		// Threshold ensures at least 2 tasks to justify dispatch overhead
+		minTasks := 2
+		if nHeads < m.parallelismCfg.MinHeadsForQKNormParallel {
+			minTasks = 99999 // Force serial execution below threshold
+		}
+		m.runTasksThreshold(tasks, minTasks)
 	}
 
-	// Apply RoPE (FP32)
+	if len(layer.kNormWeight) > 0 {
+		headsPerTask := 4
+		if nKVHeads >= 16 {
+			headsPerTask = 8
+		}
+		taskCount := (nKVHeads + headsPerTask - 1) / headsPerTask
+		tasks := make([]func(), 0, taskCount)
+
+		for hStart := 0; hStart < nKVHeads; hStart += headsPerTask {
+			start := hStart
+			end := start + headsPerTask
+			if end > nKVHeads {
+				end = nKVHeads
+			}
+
+			tasks = append(tasks, func() {
+				for s := 0; s < seqLen; s++ {
+					for h := start; h < end; h++ {
+						offset := s*kvDim + h*headDim
+						kernels.RMSNorm(k[offset:offset+headDim], k[offset:offset+headDim], layer.kNormWeight, m.config.NormEps)
+					}
+				}
+			})
+		}
+
+		// Only parallelize if we have enough heads (adaptive threshold from config)
+		// Threshold ensures at least 2 tasks to justify dispatch overhead
+		minTasks := 2
+		if nKVHeads < m.parallelismCfg.MinHeadsForQKNormParallel {
+			minTasks = 99999 // Force serial execution below threshold
+		}
+		m.runTasksThreshold(tasks, minTasks)
+	}
+
+	// Apply RoPE (FP32) with parallelization
 	if m.config.UseRoPE {
 		pos := ensureInt(&attn.positions, seqLen)
 		for i := 0; i < seqLen; i++ {
 			pos[i] = i
 		}
-		// Use cached RoPE for fast position embeddings
-		kernels.ApplyRoPECached(q, seqLen, nHeads, headDim, pos, m.ropeCache)
-		kernels.ApplyRoPECached(k, seqLen, nKVHeads, headDim, pos, m.ropeCache)
+		// Use parallel cached RoPE for fast position embeddings
+		// Parallelizes when seqLen × nHeads >= threshold (adaptive from config)
+		kernels.ApplyRoPECachedParallel(q, seqLen, nHeads, headDim, pos, m.ropeCache, m.runTasks, m.parallelismCfg.MinRoPEWorkForParallel)
+		kernels.ApplyRoPECachedParallel(k, seqLen, nKVHeads, headDim, pos, m.ropeCache, m.runTasks, m.parallelismCfg.MinRoPEWorkForParallel)
 	}
 
 	// For GQA, expand K, V
@@ -361,13 +469,29 @@ func (m *Model) runAttentionINT8(ws *modelWorkspace, output []float32, hiddenINT
 	// Run attention (FP32) using reusable scratch buffers
 	attnOut := ensureFloat32(&attn.attnOut, seqLen*embDim)
 	attnScratch := ensureFloat32(&attn.scratch, seqLen*seqLen*nHeads)
-	kernels.MultiHeadAttentionWithScale(attnOut, q, kExpanded, vExpanded, 1, seqLen, nHeads, headDim, nil, m.config.AttentionScale, attnScratch)
+	chunkSize := 0
+	if m.workers != nil && seqLen >= m.parallelismCfg.MinSeqLenForNormParallel {
+		chunkSize = seqLen / 2
+		if chunkSize > 128 {
+			chunkSize = 128
+		}
+		if chunkSize < 64 {
+			chunkSize = 64
+		}
+		if chunkSize >= seqLen {
+			chunkSize = seqLen - 1
+		}
+	}
+	// Always use MultiHeadAttentionChunked to enable head parallelism
+	// When chunkSize=0, only head parallelism is used (no chunking)
+	// Head parallelism threshold is adaptive from config (default: 8 heads)
+	kernels.MultiHeadAttentionChunked(attnOut, q, kExpanded, vExpanded, 1, seqLen, nHeads, headDim, nil, m.config.AttentionScale, attnScratch, chunkSize, m.runTasks, m.parallelismCfg.MinHeadsForAttentionParallel)
 
 	// Quantize attention output
 	kernels.QuantizeSymmetricINT8Into(&attn.attnOutINT8, attnOut, seqLen, embDim)
 
 	// Project output with INT8 (raw bytes, zero-copy)
-	kernels.MatMulQ8_0INT8(output, layer.oWeightQ8, layer.oWeightScales, &attn.attnOutINT8, seqLen, embDim, embDim)
+	m.matMulQ8_0INT8Tiled(output, layer.oWeightQ8, layer.oWeightScales, &attn.attnOutINT8, seqLen, embDim, embDim, tileSizeHint)
 }
 
 // runMLPINT8 runs MLP with INT8 activations
@@ -381,8 +505,11 @@ func (m *Model) runMLPINT8(ws *modelWorkspace, output []float32, hiddenINT8 *ker
 	up := ensureFloat32(&mlp.up, seqLen*intermDim)
 
 	// Gate and up projections with INT8 (raw bytes, zero-copy)
-	kernels.MatMulQ8_0INT8(gate, layer.gateWeightQ8, layer.gateWeightScales, hiddenINT8, seqLen, embDim, intermDim)
-	kernels.MatMulQ8_0INT8(up, layer.upWeightQ8, layer.upWeightScales, hiddenINT8, seqLen, embDim, intermDim)
+	// Use 128 for MLP since intermDim is typically larger
+	const mlpTileSizeHint = 128
+
+	m.matMulQ8_0INT8Tiled(gate, layer.gateWeightQ8, layer.gateWeightScales, hiddenINT8, seqLen, embDim, intermDim, mlpTileSizeHint)
+	m.matMulQ8_0INT8Tiled(up, layer.upWeightQ8, layer.upWeightScales, hiddenINT8, seqLen, embDim, intermDim, mlpTileSizeHint)
 
 	// Apply GELU to gate (FP32) - using SIMD-optimized version
 	kernels.GELUQuickSIMD(gate, gate, seqLen*intermDim)
@@ -394,7 +521,8 @@ func (m *Model) runMLPINT8(ws *modelWorkspace, output []float32, hiddenINT8 *ker
 	kernels.QuantizeSymmetricINT8Into(&mlp.gateINT8, gate, seqLen, intermDim)
 
 	// Down projection with INT8 (raw bytes, zero-copy)
-	kernels.MatMulQ8_0INT8(output, layer.downWeightQ8, layer.downWeightScales, &mlp.gateINT8, seqLen, intermDim, embDim)
+	const downTileSizeHint = 64
+	m.matMulQ8_0INT8Tiled(output, layer.downWeightQ8, layer.downWeightScales, &mlp.gateINT8, seqLen, intermDim, embDim, downTileSizeHint)
 }
 
 // extractQ8_0Scales extracts float32 scales from raw Q8_0 quantized data
@@ -468,4 +596,99 @@ func ensureInt(buf *[]int, size int) []int {
 		*buf = make([]int, size)
 	}
 	return (*buf)[:size]
+}
+
+// applyRMSNormParallel applies RMSNorm to each token in the sequence.
+// Parallelizes across tokens when seqLen >= threshold to improve throughput on long sequences.
+// Each token's normalization is independent, so we can process chunks in parallel.
+func (m *Model) applyRMSNormParallel(hidden []float32, normWeight []float32, seqLen, embDim int) {
+	serialNorm := func() {
+		for i := 0; i < seqLen; i++ {
+			offset := i * embDim
+			kernels.RMSNorm(
+				hidden[offset:offset+embDim],
+				hidden[offset:offset+embDim],
+				normWeight,
+				m.config.NormEps,
+			)
+		}
+	}
+
+	// Serial fallback for short sequences or no worker pool
+	if m.workers == nil || seqLen == 0 {
+		serialNorm()
+		return
+	}
+
+	workerCount := goruntime.GOMAXPROCS(0)
+	if workerCount <= 0 {
+		workerCount = 1
+	}
+	if workerCount == 1 {
+		serialNorm()
+		return
+	}
+
+	minSeqLenForParallel := m.parallelismCfg.MinSeqLenForNormParallel
+	if seqLen < minSeqLenForParallel {
+		serialNorm()
+		return
+	}
+
+	// Determine chunk size: target one chunk per worker but clamp so that tiny
+	// sequences still get work while avoiding 1-token shards.
+	chunkSize := (seqLen + workerCount - 1) / workerCount
+	if chunkSize < 4 {
+		chunkSize = 4
+	}
+
+	switch {
+	case seqLen >= 256:
+		if chunkSize > 64 {
+			chunkSize = 64
+		}
+	case seqLen >= 128:
+		if chunkSize > 48 {
+			chunkSize = 48
+		}
+	default:
+		if chunkSize > 16 {
+			chunkSize = 16
+		}
+	}
+
+	if chunkSize >= seqLen {
+		chunkSize = seqLen
+	}
+
+	// Create tasks for each chunk
+	taskCount := (seqLen + chunkSize - 1) / chunkSize
+	tasks := make([]func(), 0, taskCount)
+
+	for start := 0; start < seqLen; start += chunkSize {
+		end := start + chunkSize
+		if end > seqLen {
+			end = seqLen
+		}
+
+		// Capture loop variables
+		tokenStart := start
+		tokenEnd := end
+
+		tasks = append(tasks, func() {
+			for i := tokenStart; i < tokenEnd; i++ {
+				offset := i * embDim
+				kernels.RMSNorm(
+					hidden[offset:offset+embDim],
+					hidden[offset:offset+embDim],
+					normWeight,
+					m.config.NormEps,
+				)
+			}
+		})
+	}
+
+	// Use threshold-based parallelization: only dispatch if we have enough tasks
+	// minTasks=2 ensures we have at least 2 chunks of work to distribute
+	m.runTasksThreshold(tasks, 2)
 }

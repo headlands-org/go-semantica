@@ -71,86 +71,240 @@ func MultiHeadAttentionWithScale(
 	scale float32,
 	scratch []float32,
 ) {
+	// Use 0 threshold to disable parallelism in non-chunked version
+	multiHeadAttentionInternal(output, Q, K, V, batchSize, seqLen, nHeads, headDim, mask, scale, scratch, 0, nil, 0)
+}
+
+// MultiHeadAttentionChunked computes attention while partitioning the key/value
+// sequence into contiguous chunks that can be evaluated in parallel via the
+// provided task runner. When chunkSize <= 0, chunkSize >= seqLen, or runTasks is
+// nil the function falls back to the serial implementation.
+//
+// For single-query inference (seqLen=1), heads are parallelized instead of chunks.
+// For multi-query, both chunking and head parallelism can be combined.
+//
+// minHeadsForParallel: Minimum number of heads required to enable head parallelism.
+// Set to 8 for multi-query, 16 for single-query for optimal performance.
+func MultiHeadAttentionChunked(
+	output, Q, K, V []float32,
+	batchSize, seqLen, nHeads, headDim int,
+	mask []float32,
+	scale float32,
+	scratch []float32,
+	chunkSize int,
+	runTasks func(...func()),
+	minHeadsForParallel int,
+) {
+	multiHeadAttentionInternal(output, Q, K, V, batchSize, seqLen, nHeads, headDim, mask, scale, scratch, chunkSize, runTasks, minHeadsForParallel)
+}
+
+func multiHeadAttentionInternal(
+	output, Q, K, V []float32,
+	batchSize, seqLen, nHeads, headDim int,
+	mask []float32,
+	scale float32,
+	scratch []float32,
+	chunkSize int,
+	runTasks func(...func()),
+	minHeadsForParallel int,
+) {
 
 	if seqLen == 0 || nHeads == 0 || headDim == 0 || batchSize == 0 {
 		return
 	}
 
 	headStride := nHeads * headDim
+	headScratchStride := seqLen * seqLen
 
-	// For each batch and head
+	// Determine parallelization strategy:
+	// 1. For single-query (seqLen=1), only parallelize if many heads (threshold × 2)
+	//    - Each head has minimal work, so need enough heads to overcome dispatch overhead
+	// 2. For multi-query with many heads (>= threshold), parallelize with optional chunking
+	// 3. Otherwise use existing chunking strategy
+	singleQueryThreshold := minHeadsForParallel * 2 // Double threshold for single-query
+	parallelizeHeads := runTasks != nil && ((seqLen == 1 && nHeads >= singleQueryThreshold) || (seqLen > 1 && nHeads >= minHeadsForParallel))
+	chunked := runTasks != nil && chunkSize > 0 && chunkSize < seqLen
+
+	// For each batch
 	for b := 0; b < batchSize; b++ {
 		batchBase := (b * seqLen) * headStride
 
-		for h := 0; h < nHeads; h++ {
-			// Offset within slices that corresponds to the current head.
+		if parallelizeHeads {
+			// Parallelize across heads (groups of 2-4 heads per task)
+			// For single-query: pure head parallelism
+			// For multi-query with chunking: heads can be processed in parallel
+			headsPerTask := 2
+			if nHeads >= 16 {
+				headsPerTask = 4
+			}
+			if seqLen == 1 {
+				// Single query: maximize head parallelism
+				headsPerTask = 1
+			}
+
+			numTasks := (nHeads + headsPerTask - 1) / headsPerTask
+			headTasks := make([]func(), numTasks)
+
+			for taskIdx := 0; taskIdx < numTasks; taskIdx++ {
+				hStart := taskIdx * headsPerTask
+				hEnd := hStart + headsPerTask
+				if hEnd > nHeads {
+					hEnd = nHeads
+				}
+
+				// Capture loop variables
+				headStart := hStart
+				headEnd := hEnd
+
+				headTasks[taskIdx] = func() {
+					processHeadRange(output, Q, K, V, mask, scratch, scale,
+						batchBase, headStart, headEnd, seqLen, nHeads, headDim,
+						headStride, headScratchStride, chunkSize, chunked, runTasks)
+				}
+			}
+
+			runTasks(headTasks...)
+		} else {
+			// Serial head processing with optional chunking
+			processHeadRange(output, Q, K, V, mask, scratch, scale,
+				batchBase, 0, nHeads, seqLen, nHeads, headDim,
+				headStride, headScratchStride, chunkSize, chunked, runTasks)
+		}
+	}
+}
+
+// processHeadRange processes a range of attention heads [headStart, headEnd)
+// This function can be called in parallel for different head ranges.
+func processHeadRange(
+	output, Q, K, V, mask, scratch []float32,
+	scale float32,
+	batchBase, headStart, headEnd, seqLen, nHeads, headDim int,
+	headStride, headScratchStride, chunkSize int,
+	chunked bool,
+	runTasks func(...func()),
+) {
+	// Process chunk computations for all heads in this range if chunking is enabled
+	if chunked {
+		var chunkTasks []func()
+
+		for h := headStart; h < headEnd; h++ {
 			headOffset := batchBase + h*headDim
+			headScores := scratch[h*headScratchStride : (h+1)*headScratchStride]
 
-			var scaledBuf []float32
-			if hasAVX2 && headDim >= 8 {
-				scaledBuf = make([]float32, headDim)
-			}
+			hOffset := headOffset
+			scoresView := headScores
 
-			// Compute attention scores: scores[i,j] = Q[i] · K[j]
-			for i := 0; i < seqLen; i++ {
-				qOffset := headOffset + i*headStride
-				qRow := Q[qOffset : qOffset+headDim]
-				scoresRow := scratch[i*seqLen : i*seqLen+seqLen]
-
-				kOffset := headOffset
-
-				for j := 0; j < seqLen; j++ {
-					kRow := K[kOffset : kOffset+headDim]
-
-					// Prefer SIMD dot product when available; otherwise fall back to the
-					// unrolled inline helper to keep indices simple.
-					var score float32
-					if hasAVX2 && headDim >= 8 {
-						score = dotProductSIMD(qRow, kRow, headDim)
-					} else {
-						score = dotProductInline(qRow, kRow)
-					}
-					score *= scale
-
-					// Apply mask if provided
-					if mask != nil {
-						score += mask[i*seqLen+j]
-					}
-
-					scoresRow[j] = score
-					kOffset += headStride
-				}
-			}
-
-			// Apply softmax to each row
-			for i := 0; i < seqLen; i++ {
-				Softmax(scratch[i*seqLen:], scratch[i*seqLen:], seqLen)
-			}
-
-			// Compute weighted sum of values: output[i] = sum_j(scores[i,j] * V[j])
-			for i := 0; i < seqLen; i++ {
-				outOffset := headOffset + i*headStride
-				outRow := output[outOffset : outOffset+headDim]
-
-				for d := range outRow {
-					outRow[d] = 0
+			for colStart := 0; colStart < seqLen; colStart += chunkSize {
+				start := colStart
+				end := start + chunkSize
+				if end > seqLen {
+					end = seqLen
 				}
 
-				vOffset := headOffset
+				s := start
+				e := end
+				chunkTasks = append(chunkTasks, func() {
+					computeAttentionScoresRange(scoresView, Q, K, mask, scale, hOffset, headStride, seqLen, headDim, s, e)
+				})
+			}
+		}
 
-				// Accumulate
-				for j := 0; j < seqLen; j++ {
-					weight := scratch[i*seqLen+j]
-					if weight == 0 {
-						vOffset += headStride
-						continue
-					}
+		// Run chunk tasks serially within this head range
+		// (they're already part of a parallel head task)
+		for _, task := range chunkTasks {
+			task()
+		}
+	}
 
-					vRow := V[vOffset : vOffset+headDim]
-					axpyAccum(outRow, vRow, weight, scaledBuf)
+	// Process each head in the range
+	for h := headStart; h < headEnd; h++ {
+		headOffset := batchBase + h*headDim
+		headScores := scratch[h*headScratchStride : (h+1)*headScratchStride]
+
+		// Compute attention scores if not chunked
+		if !chunked {
+			computeAttentionScoresRange(headScores, Q, K, mask, scale, headOffset, headStride, seqLen, headDim, 0, seqLen)
+		}
+
+		var scaledBuf []float32
+		if hasAVX2 && headDim >= 8 {
+			scaledBuf = make([]float32, headDim)
+		}
+
+		// Apply softmax to each row
+		for i := 0; i < seqLen; i++ {
+			row := headScores[i*seqLen : i*seqLen+seqLen]
+			Softmax(row, row, seqLen)
+		}
+
+		// Compute weighted sum of values: output[i] = sum_j(scores[i,j] * V[j])
+		for i := 0; i < seqLen; i++ {
+			outOffset := headOffset + i*headStride
+			outRow := output[outOffset : outOffset+headDim]
+
+			for d := range outRow {
+				outRow[d] = 0
+			}
+
+			vOffset := headOffset
+
+			// Accumulate
+			for j := 0; j < seqLen; j++ {
+				weight := headScores[i*seqLen+j]
+				if weight == 0 {
 					vOffset += headStride
+					continue
 				}
+
+				vRow := V[vOffset : vOffset+headDim]
+				axpyAccum(outRow, vRow, weight, scaledBuf)
+				vOffset += headStride
 			}
+		}
+	}
+}
+
+func computeAttentionScoresRange(
+	scores, Q, K, mask []float32,
+	scale float32,
+	headOffset, headStride, seqLen, headDim int,
+	colStart, colEnd int,
+) {
+	if colStart < 0 {
+		colStart = 0
+	}
+	if colEnd > seqLen {
+		colEnd = seqLen
+	}
+	if colStart >= colEnd {
+		return
+	}
+
+	for i := 0; i < seqLen; i++ {
+		qOffset := headOffset + i*headStride
+		qRow := Q[qOffset : qOffset+headDim]
+		scoresRow := scores[i*seqLen+colStart : i*seqLen+colEnd]
+
+		kOffset := headOffset + colStart*headStride
+
+		for j := colStart; j < colEnd; j++ {
+			kRow := K[kOffset : kOffset+headDim]
+
+			var score float32
+			if hasAVX2 && headDim >= 8 {
+				score = dotProductSIMD(qRow, kRow, headDim)
+			} else {
+				score = dotProductInline(qRow, kRow)
+			}
+
+			score *= scale
+
+			if mask != nil {
+				score += mask[i*seqLen+j]
+			}
+
+			scoresRow[j-colStart] = score
+			kOffset += headStride
 		}
 	}
 }

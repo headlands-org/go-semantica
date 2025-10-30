@@ -365,19 +365,42 @@ func MatMulQ8_0INT8(dst []float32, weightData []byte, scales []float32, input *Q
 		dst[i] = 0
 	}
 
-	matMulQ8_0INT8SerialTiled(dst, weightData, scales, input, batch, inDim, outDim, blocksPerRow, bytesPerRow)
+	matMulQ8_0INT8SerialRange(dst, weightData, scales, input, batch, inDim, outDim, blocksPerRow, bytesPerRow, 0, outDim)
 }
 
-func matMulQ8_0INT8SerialTiled(dst []float32, weightData []byte, scales []float32, input *QuantizedTensorINT8, batch, inDim, outDim, blocksPerRow, bytesPerRow int) {
+// MatMulQ8_0INT8Range computes a column range [colStart, colEnd) of the matmul.
+// The caller is responsible for zeroing dst for the target range before invoking.
+func MatMulQ8_0INT8Range(dst []float32, weightData []byte, scales []float32, input *QuantizedTensorINT8, batch, inDim, outDim, colStart, colEnd int) {
+	if input.Rows != batch || input.Cols != inDim {
+		panic("MatMulQ8_0INT8Range: input shape mismatch")
+	}
+	if len(dst) < batch*outDim {
+		panic("MatMulQ8_0INT8Range: dst too small")
+	}
+	if colStart < 0 || colEnd > outDim || colStart >= colEnd {
+		panic("MatMulQ8_0INT8Range: invalid column range")
+	}
+
+	blocksPerRow := (inDim + 31) / 32
+	bytesPerRow := blocksPerRow * 34
+
+	matMulQ8_0INT8SerialRange(dst, weightData, scales, input, batch, inDim, outDim, blocksPerRow, bytesPerRow, colStart, colEnd)
+}
+
+func matMulQ8_0INT8SerialRange(dst []float32, weightData []byte, scales []float32, input *QuantizedTensorINT8, batch, inDim, outDim, blocksPerRow, bytesPerRow, colStart, colEnd int) {
 	inputScale := input.Scale
 	fullBlocks := inDim / 32
 	hasPartialBlock := inDim%32 != 0
 
+	colSpan := colEnd - colStart
 	tileOut := 4
-	if outDim >= 512 {
+	if colSpan >= 512 {
 		tileOut = 16
-	} else if outDim >= 256 {
+	} else if colSpan >= 256 {
 		tileOut = 8
+	}
+	if tileOut > colSpan {
+		tileOut = colSpan
 	}
 
 	tileBatch := 1
@@ -390,8 +413,8 @@ func matMulQ8_0INT8SerialTiled(dst []float32, weightData []byte, scales []float3
 	tailStart := fullBlocks * 32
 	tailSize := inDim - tailStart
 
-	for jBlock := 0; jBlock < outDim; jBlock += tileOut {
-		jMax := min(jBlock+tileOut, outDim)
+	for jBlock := colStart; jBlock < colEnd; jBlock += tileOut {
+		jMax := min(jBlock+tileOut, colEnd)
 
 		for iBlock := 0; iBlock < batch; iBlock += tileBatch {
 			iMax := min(iBlock+tileBatch, batch)

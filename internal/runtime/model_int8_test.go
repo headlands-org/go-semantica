@@ -242,3 +242,161 @@ func TestExtractQ8_0Scales(t *testing.T) {
 		}
 	})
 }
+
+func TestApplyRMSNormParallel(t *testing.T) {
+	// Test that parallel and serial RMSNorm produce identical results
+	testCases := []struct {
+		name   string
+		seqLen int
+		embDim int
+	}{
+		{"Short_8tokens", 8, 128},
+		{"Threshold_32tokens", 32, 256},
+		{"Medium_64tokens", 64, 512},
+		{"Long_128tokens", 128, 768},
+		{"VeryLong_256tokens", 256, 1024},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create a model with and without workers
+			configWithWorkers := ModelConfig{
+				EmbedDim: tc.embDim,
+				NormEps:  1e-5,
+			}
+			configNoWorkers := ModelConfig{
+				EmbedDim: tc.embDim,
+				NormEps:  1e-5,
+			}
+
+			modelWithWorkers := &Model{
+				config:         configWithWorkers,
+				parallelismCfg: DefaultParallelismConfig(configWithWorkers),
+				workers:        newWorkerPool(4),
+			}
+			defer modelWithWorkers.workers.Close()
+
+			modelNoWorkers := &Model{
+				config:         configNoWorkers,
+				parallelismCfg: DefaultParallelismConfig(configNoWorkers),
+				workers:        nil,
+			}
+
+			// Create test data
+			hidden := make([]float32, tc.seqLen*tc.embDim)
+			hiddenSerial := make([]float32, tc.seqLen*tc.embDim)
+			normWeight := make([]float32, tc.embDim)
+
+			// Initialize with some values
+			for i := range hidden {
+				hidden[i] = float32(i%100) / 10.0
+				hiddenSerial[i] = hidden[i]
+			}
+			for i := range normWeight {
+				normWeight[i] = 1.0 + float32(i%10)/100.0
+			}
+
+			// Apply normalization with both approaches
+			modelWithWorkers.applyRMSNormParallel(hidden, normWeight, tc.seqLen, tc.embDim)
+			modelNoWorkers.applyRMSNormParallel(hiddenSerial, normWeight, tc.seqLen, tc.embDim)
+
+			// Compare results
+			const epsilon = 1e-6
+			for i := range hidden {
+				diff := math.Abs(float64(hidden[i] - hiddenSerial[i]))
+				if diff > epsilon {
+					t.Errorf("Mismatch at index %d: parallel=%v, serial=%v, diff=%v",
+						i, hidden[i], hiddenSerial[i], diff)
+					break
+				}
+			}
+		})
+	}
+}
+
+func TestApplyRMSNormParallelHasSerialFallback(t *testing.T) {
+	cfg := ModelConfig{EmbedDim: 12}
+	modelWithWorkers := &Model{config: cfg, workers: newWorkerPool(2), parallelismCfg: DefaultParallelismConfig(cfg)}
+	defer modelWithWorkers.workers.Close()
+
+	modelNoWorkers := &Model{config: cfg, parallelismCfg: DefaultParallelismConfig(cfg)}
+
+	seqLen := 4
+	embDim := 12
+	normWeight := make([]float32, embDim)
+	for i := range normWeight {
+		normWeight[i] = 1
+	}
+
+	hidden := make([]float32, seqLen*embDim)
+	modelWithWorkers.applyRMSNormParallel(hidden, normWeight, seqLen, embDim)
+	modelNoWorkers.applyRMSNormParallel(hidden, normWeight, seqLen, embDim)
+}
+func BenchmarkApplyRMSNormParallel(b *testing.B) {
+	benchmarks := []struct {
+		name   string
+		seqLen int
+		embDim int
+	}{
+		{"Short_8x128", 8, 128},
+		{"Threshold_32x256", 32, 256},
+		{"Medium_64x512", 64, 512},
+		{"Long_128x768", 128, 768},
+		{"VeryLong_256x1024", 256, 1024},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name+"_Serial", func(b *testing.B) {
+			config := ModelConfig{
+				EmbedDim: bm.embDim,
+				NormEps:  1e-5,
+			}
+			model := &Model{
+				config:         config,
+				parallelismCfg: DefaultParallelismConfig(config),
+				workers:        nil, // Force serial
+			}
+
+			hidden := make([]float32, bm.seqLen*bm.embDim)
+			normWeight := make([]float32, bm.embDim)
+			for i := range hidden {
+				hidden[i] = float32(i % 100)
+			}
+			for i := range normWeight {
+				normWeight[i] = 1.0
+			}
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				model.applyRMSNormParallel(hidden, normWeight, bm.seqLen, bm.embDim)
+			}
+		})
+
+		b.Run(bm.name+"_Parallel", func(b *testing.B) {
+			config := ModelConfig{
+				EmbedDim: bm.embDim,
+				NormEps:  1e-5,
+			}
+			model := &Model{
+				config:         config,
+				parallelismCfg: DefaultParallelismConfig(config),
+				workers:        newWorkerPool(4),
+			}
+			defer model.workers.Close()
+
+			hidden := make([]float32, bm.seqLen*bm.embDim)
+			normWeight := make([]float32, bm.embDim)
+			for i := range hidden {
+				hidden[i] = float32(i % 100)
+			}
+			for i := range normWeight {
+				normWeight[i] = 1.0
+			}
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				model.applyRMSNormParallel(hidden, normWeight, bm.seqLen, bm.embDim)
+			}
+		})
+	}
+}
