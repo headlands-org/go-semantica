@@ -1,9 +1,5 @@
 package annoy
 
-import (
-	"github.com/lth/pure-go-llamas/pkg/ggufembed"
-)
-
 // BuilderOption configures a Builder.
 type BuilderOption func(*BuilderConfig)
 
@@ -14,10 +10,7 @@ type BuilderConfig struct {
 	NumTrees    int
 	MaxLeafSize int
 	Seed        int64
-
-	EmbedRuntime ggufembed.Runtime
-	EmbedDim     int
-	Progress     ProgressFunc
+	Progress    ProgressFunc
 }
 
 // WithDimension sets the vector dimensionality.
@@ -52,20 +45,6 @@ func WithMaxLeafSize(size int) BuilderOption {
 func WithSeed(seed int64) BuilderOption {
 	return func(cfg *BuilderConfig) {
 		cfg.Seed = seed
-	}
-}
-
-// WithRuntime injects a pre-opened embedding runtime used by AddText/SearchText.
-func WithRuntime(rt ggufembed.Runtime) BuilderOption {
-	return func(cfg *BuilderConfig) {
-		cfg.EmbedRuntime = rt
-	}
-}
-
-// WithEmbeddingDim sets the target embedding dimension for Matryoshka truncation.
-func WithEmbeddingDim(dim int) BuilderOption {
-	return func(cfg *BuilderConfig) {
-		cfg.EmbedDim = dim
 	}
 }
 

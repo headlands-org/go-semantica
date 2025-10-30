@@ -1,11 +1,13 @@
 package annoy
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"unsafe"
+
+	"github.com/lth/pure-go-llamas/search"
 )
 
 var fileMagic = [4]byte{'A', 'N', 'N', 'G'}
@@ -28,6 +30,13 @@ type countingWriter struct {
 	n int64
 }
 
+type serialisableIndex struct {
+	Config     BuilderConfig
+	IDs        []int32
+	VectorData []float32
+	Trees      []*node
+}
+
 func (cw *countingWriter) Write(p []byte) (int, error) {
 	n, err := cw.w.Write(p)
 	cw.n += int64(n)
@@ -36,55 +45,44 @@ func (cw *countingWriter) Write(p []byte) (int, error) {
 
 func writeIndex(w io.Writer, idx *serialisableIndex) (int64, error) {
 	cw := &countingWriter{w: w}
+	dim := idx.Config.Dimension
+	if dim == 0 {
+		if len(idx.IDs) == 0 {
+			return 0, errors.New("annoy: zero-dimension index with no vectors")
+		}
+		if len(idx.VectorData) == 0 {
+			return 0, errors.New("annoy: missing vector payload")
+		}
+		dim = len(idx.VectorData) / len(idx.IDs)
+		idx.Config.Dimension = dim
+	}
 	header := fileHeader{
 		Magic:       fileMagic,
 		Version:     fileVersion,
 		Metric:      uint16(idx.Config.Metric),
-		Dimension:   uint16(idx.Config.Dimension),
+		Dimension:   uint16(dim),
 		NumTrees:    uint16(len(idx.Trees)),
 		MaxLeaf:     uint16(idx.Config.MaxLeafSize),
-		VectorCount: uint32(len(idx.Vectors)),
-	}
-	if header.Dimension == 0 {
-		header.Dimension = uint16(len(idx.Vectors[0]))
-	}
-
-	if header.NumTrees == 0 {
-		header.NumTrees = 0
+		VectorCount: uint32(len(idx.IDs)),
 	}
 
 	if err := binary.Write(cw, binary.LittleEndian, header); err != nil {
 		return cw.n, err
 	}
 
-	dim := int(header.Dimension)
-	for i := range idx.Vectors {
-		idBytes := []byte(idx.IDs[i])
-		if len(idBytes) > mathMaxUint16 {
-			return cw.n, fmt.Errorf("annoy: id %q exceeds length limit", idx.IDs[i])
+	if len(idx.IDs) > 0 {
+		if err := binary.Write(cw, binary.LittleEndian, idx.IDs); err != nil {
+			return cw.n, fmt.Errorf("annoy: write ids: %w", err)
 		}
-		meta := idx.Metadata[i]
-		if err := binary.Write(cw, binary.LittleEndian, uint16(len(idBytes))); err != nil {
-			return cw.n, err
-		}
-		if _, err := cw.Write(idBytes); err != nil {
-			return cw.n, err
-		}
-		if err := binary.Write(cw, binary.LittleEndian, uint32(len(meta))); err != nil {
-			return cw.n, err
-		}
-		if len(meta) > 0 {
-			if _, err := cw.Write(meta); err != nil {
-				return cw.n, err
-			}
-		}
-		if err := binary.Write(cw, binary.LittleEndian, idx.Vectors[i]); err != nil {
-			return cw.n, err
+	}
+	if len(idx.VectorData) > 0 {
+		if err := binary.Write(cw, binary.LittleEndian, idx.VectorData); err != nil {
+			return cw.n, fmt.Errorf("annoy: write vectors: %w", err)
 		}
 	}
 
 	for _, tree := range idx.Trees {
-		if err := writeTree(cw, tree, dim); err != nil {
+		if err := writeTree(cw, tree); err != nil {
 			return cw.n, err
 		}
 	}
@@ -92,12 +90,11 @@ func writeIndex(w io.Writer, idx *serialisableIndex) (int64, error) {
 }
 
 const (
-	nodeLeaf      = byte(1)
-	nodeInternal  = byte(0)
-	mathMaxUint16 = 1<<16 - 1
+	nodeLeaf     = byte(1)
+	nodeInternal = byte(0)
 )
 
-func writeTree(w io.Writer, n *node, dim int) error {
+func writeTree(w io.Writer, n *node) error {
 	if n.leaf {
 		if _, err := w.Write([]byte{nodeLeaf}); err != nil {
 			return err
@@ -122,22 +119,38 @@ func writeTree(w io.Writer, n *node, dim int) error {
 	if err := binary.Write(w, binary.LittleEndian, n.threshold); err != nil {
 		return err
 	}
-	if err := writeTree(w, n.left, dim); err != nil {
+	if err := writeTree(w, n.left); err != nil {
 		return err
 	}
-	return writeTree(w, n.right, dim)
+	return writeTree(w, n.right)
 }
 
 type loadedIndex struct {
-	Config   BuilderConfig
-	IDs      []string
-	Vectors  [][]float32
-	Metadata [][]byte
-	Trees    []*node
+	Config        BuilderConfig
+	IDs           []int32
+	VectorData    []float32
+	VectorBacking []byte
+	Trees         []*node
 }
 
-func readIndex(data []byte) (*loadedIndex, error) {
-	r := bytes.NewReader(data)
+// Serializer implements search.Serializer for Annoy indices.
+type Serializer struct{}
+
+// Serialize writes the index to bytes.
+func (Serializer) Serialize(idx search.Index) ([]byte, error) {
+	ann, ok := idx.(*Index)
+	if !ok {
+		return nil, fmt.Errorf("annoy: serializer expects *Index, got %T", idx)
+	}
+	return ann.Bytes()
+}
+
+// Deserialize reconstructs an Annoy index from bytes.
+func (Serializer) Deserialize(data []byte) (search.Index, error) {
+	return Load(data)
+}
+
+func readIndex(r io.Reader) (*loadedIndex, error) {
 	var header fileHeader
 	if err := binary.Read(r, binary.LittleEndian, &header); err != nil {
 		return nil, err
@@ -157,37 +170,25 @@ func readIndex(data []byte) (*loadedIndex, error) {
 	}
 
 	count := int(header.VectorCount)
-	ids := make([]string, count)
-	vectors := make([][]float32, count)
-	metadata := make([][]byte, count)
+	ids := make([]int32, count)
+	if count > 0 {
+		if err := binary.Read(r, binary.LittleEndian, ids); err != nil {
+			return nil, fmt.Errorf("annoy: read ids: %w", err)
+		}
+	}
 
-	for i := 0; i < count; i++ {
-		var idLen uint16
-		if err := binary.Read(r, binary.LittleEndian, &idLen); err != nil {
-			return nil, fmt.Errorf("annoy: read id length: %w", err)
+	var (
+		vecBacking []byte
+		vecData    []float32
+	)
+	totalFloats := count * cfg.Dimension
+	if totalFloats > 0 {
+		byteLen := totalFloats * 4
+		vecBacking = make([]byte, byteLen)
+		if _, err := io.ReadFull(r, vecBacking); err != nil {
+			return nil, fmt.Errorf("annoy: read vectors: %w", err)
 		}
-		idBytes := make([]byte, idLen)
-		if _, err := io.ReadFull(r, idBytes); err != nil {
-			return nil, fmt.Errorf("annoy: read id: %w", err)
-		}
-		ids[i] = string(idBytes)
-
-		var metaLen uint32
-		if err := binary.Read(r, binary.LittleEndian, &metaLen); err != nil {
-			return nil, fmt.Errorf("annoy: read metadata length: %w", err)
-		}
-		if metaLen > 0 {
-			meta := make([]byte, metaLen)
-			if _, err := io.ReadFull(r, meta); err != nil {
-				return nil, fmt.Errorf("annoy: read metadata: %w", err)
-			}
-			metadata[i] = meta
-		}
-		vec := make([]float32, cfg.Dimension)
-		if err := binary.Read(r, binary.LittleEndian, vec); err != nil {
-			return nil, fmt.Errorf("annoy: read vector: %w", err)
-		}
-		vectors[i] = vec
+		vecData = unsafe.Slice((*float32)(unsafe.Pointer(&vecBacking[0])), totalFloats)
 	}
 
 	trees := make([]*node, cfg.NumTrees)
@@ -200,11 +201,11 @@ func readIndex(data []byte) (*loadedIndex, error) {
 	}
 
 	return &loadedIndex{
-		Config:   cfg,
-		IDs:      ids,
-		Vectors:  vectors,
-		Metadata: metadata,
-		Trees:    trees,
+		Config:        cfg,
+		IDs:           ids,
+		VectorData:    vecData,
+		VectorBacking: vecBacking,
+		Trees:         trees,
 	}, nil
 }
 

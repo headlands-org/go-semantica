@@ -13,10 +13,24 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lth/pure-go-llamas/annoy"
+	"github.com/lth/pure-go-llamas/model"
+	"github.com/lth/pure-go-llamas/pkg/ggufembed"
+	"github.com/lth/pure-go-llamas/search"
+	annoyindex "github.com/lth/pure-go-llamas/search/annoy"
 )
 
 const defaultIconsPath = "../one/go/hugeicons/icons.json"
+
+type iconInfo struct {
+	Slug        string
+	Title       string
+	Description string
+}
+
+type embeddingRecord struct {
+	ID     int32     `json:"id"`
+	Vector []float32 `json:"vector"`
+}
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `annoy example commands:
@@ -57,7 +71,7 @@ func runBuild(args []string) {
 	fs := flag.NewFlagSet("build", flag.ExitOnError)
 	inputPath := fs.String("input", defaultIconsPath, "Path to icons.json")
 	outputPath := fs.String("output", "icons.ann", "Output index file")
-	embeddingsPath := fs.String("embeddings", "", "Optional embeddings output (JSONL)")
+	embeddingsPath := fs.String("embeddings", "", "Optional path to export embeddings JSONL")
 	numTrees := fs.Int("trees", 32, "Number of Annoy trees")
 	maxLeaf := fs.Int("leaf", 32, "Maximum leaf size")
 	targetDim := fs.Int("dim", 512, "Embedding dimension (Matryoshka tier)")
@@ -72,60 +86,105 @@ func runBuild(args []string) {
 	}
 	loadDur := time.Since(start)
 
+	rt, err := model.Open()
+	if err != nil {
+		log.Fatalf("open model: %v", err)
+	}
+	defer rt.Close()
+
 	ctx := context.Background()
 	progress := newProgressPrinter()
-	builder := annoy.NewBuilder(
-		annoy.WithNumTrees(*numTrees),
-		annoy.WithMaxLeafSize(*maxLeaf),
-		annoy.WithEmbeddingDim(*targetDim),
-		annoy.WithDimension(*targetDim),
-		annoy.WithProgress(progress),
+	builder := annoyindex.NewBuilder(
+		annoyindex.WithNumTrees(*numTrees),
+		annoyindex.WithMaxLeafSize(*maxLeaf),
+		annoyindex.WithDimension(*targetDim),
+		annoyindex.WithProgress(progress),
 	)
 
-	docs := make([]annoy.Document, len(icons))
-	for i, icon := range icons {
-		meta, err := json.Marshal(iconMetadata{
-			Title:       icon.Title,
-			Description: icon.Description,
-		})
-		if err != nil {
-			log.Fatalf("marshal metadata for %s: %v", icon.ID, err)
-		}
-		docs[i] = annoy.Document{ID: icon.ID, Title: icon.Title, Text: icon.Description, Metadata: meta}
-	}
-
-	embedStart := time.Now()
-	if err := builder.AddBatchTexts(ctx, docs, 128); err != nil {
-		log.Fatalf("embed batch: %v", err)
-	}
-	embedDur := time.Since(embedStart)
-
-	buildStart := time.Now()
-	if err := builder.Build(ctx); err != nil {
-		log.Fatalf("build index: %v", err)
-	}
-	buildDur := time.Since(buildStart)
-
-	serialStart := time.Now()
-	data, err := builder.Bytes()
-	if err != nil {
-		log.Fatalf("serialise index: %v", err)
-	}
-	if err := os.WriteFile(*outputPath, data, 0o644); err != nil {
-		log.Fatalf("write index: %v", err)
-	}
+	var (
+		embedFile *os.File
+		embedMu   sync.Mutex
+	)
 	if *embeddingsPath != "" {
 		f, err := os.Create(*embeddingsPath)
 		if err != nil {
 			log.Fatalf("create embeddings file: %v", err)
 		}
-		if err := builder.WriteEmbeddings(f); err != nil {
-			f.Close()
-			log.Fatalf("write embeddings: %v", err)
+		embedFile = f
+		defer func() {
+			embedMu.Lock()
+			if err := embedFile.Close(); err != nil {
+				log.Printf("close embeddings file: %v", err)
+			}
+			embedMu.Unlock()
+		}()
+	}
+
+	embedStart := time.Now()
+	batchSize := 128
+	for startIdx := 0; startIdx < len(icons); startIdx += batchSize {
+		endIdx := startIdx + batchSize
+		if endIdx > len(icons) {
+			endIdx = len(icons)
 		}
-		if err := f.Close(); err != nil {
-			log.Fatalf("close embeddings: %v", err)
+		batch := icons[startIdx:endIdx]
+		inputs := make([]ggufembed.EmbedInput, len(batch))
+		for i, icon := range batch {
+			inputs[i] = ggufembed.EmbedInput{
+				Task:    ggufembed.TaskSearchDocument,
+				Title:   icon.Title,
+				Content: icon.Description,
+				Dim:     *targetDim,
+			}
 		}
+		vectors, err := rt.EmbedInputs(ctx, inputs)
+		if err != nil {
+			log.Fatalf("embed batch: %v", err)
+		}
+		for i, vec := range vectors {
+			if err := builder.AddVector(int32(startIdx+i), vec); err != nil {
+				log.Fatalf("AddVector failed: %v", err)
+			}
+			if embedFile != nil {
+				record := embeddingRecord{
+					ID:     int32(startIdx + i),
+					Vector: vec,
+				}
+				data, err := json.Marshal(record)
+				if err != nil {
+					log.Fatalf("marshal embedding: %v", err)
+				}
+				embedMu.Lock()
+				if _, err := embedFile.Write(data); err != nil {
+					log.Fatalf("write embedding: %v", err)
+				}
+				if _, err := embedFile.Write([]byte("\n")); err != nil {
+					log.Fatalf("write newline: %v", err)
+				}
+				embedMu.Unlock()
+			}
+		}
+	}
+	embedDur := time.Since(embedStart)
+
+	buildStart := time.Now()
+	idxIface, err := builder.Build(ctx)
+	if err != nil {
+		log.Fatalf("build index: %v", err)
+	}
+	annIdx, ok := idxIface.(*annoyindex.Index)
+	if !ok {
+		log.Fatalf("unexpected index type %T", idxIface)
+	}
+	buildDur := time.Since(buildStart)
+
+	serialStart := time.Now()
+	data, err := annIdx.Bytes()
+	if err != nil {
+		log.Fatalf("serialise index: %v", err)
+	}
+	if err := os.WriteFile(*outputPath, data, 0o644); err != nil {
+		log.Fatalf("write index: %v", err)
 	}
 	serialDur := time.Since(serialStart)
 
@@ -146,6 +205,7 @@ func runBuild(args []string) {
 func runSearch(args []string) {
 	fs := flag.NewFlagSet("search", flag.ExitOnError)
 	indexPath := fs.String("index", "icons.ann", "Path to Annoy index file")
+	iconsPath := fs.String("icons", defaultIconsPath, "Path to icons.json for metadata")
 	query := fs.String("query", "", "Query text")
 	topK := fs.Int("top", 5, "Number of neighbours to return")
 	searchK := fs.Int("searchk", 0, "search_k override (default: trees * top)")
@@ -156,25 +216,40 @@ func runSearch(args []string) {
 		log.Fatal("search: -query is required")
 	}
 
+	icons, err := loadIcons(*iconsPath)
+	if err != nil {
+		log.Fatalf("load icons: %v", err)
+	}
+
 	loadStart := time.Now()
-	idx, err := annoy.LoadFile(*indexPath)
+	idx, err := annoyindex.LoadFile(*indexPath)
 	if err != nil {
 		log.Fatalf("load index: %v", err)
 	}
 	loadDur := time.Since(loadStart)
 
+	rt, err := model.Open()
+	if err != nil {
+		log.Fatalf("open model: %v", err)
+	}
+	defer rt.Close()
+
 	ctx := context.Background()
 	embedStart := time.Now()
-	vec, err := idx.EmbedQuery(ctx, *query)
+	vec, err := rt.EmbedSingleInput(ctx, ggufembed.EmbedInput{
+		Task:    ggufembed.TaskSearchQuery,
+		Content: *query,
+		Dim:     idx.Dimension(),
+	})
 	if err != nil {
 		log.Fatalf("embed query: %v", err)
 	}
 	embedDur := time.Since(embedStart)
 
 	searchStart := time.Now()
-	opts := []annoy.SearchOption{}
+	opts := []search.SearchOption{}
 	if *searchK > 0 {
-		opts = append(opts, annoy.WithSearchK(*searchK))
+		opts = append(opts, search.WithSearchK(*searchK))
 	}
 	results, err := idx.SearchVector(vec, *topK, opts...)
 	if err != nil {
@@ -182,20 +257,21 @@ func runSearch(args []string) {
 	}
 	searchDur := time.Since(searchStart)
 
-	fmt.Printf("Loaded index in %s (%d items)\n", loadDur.Truncate(time.Millisecond), len(idx.Items()))
+	fmt.Printf("Loaded index in %s (%d items)\n", loadDur.Truncate(time.Millisecond), idx.Count())
 	fmt.Printf("Search \"%s\" (%d results) embed=%s search=%s\n",
-		*query, len(results), embedDur.Truncate(time.Millisecond), searchDur.Truncate(time.Millisecond))
+		*query, len(results), embedDur.Truncate(time.Millisecond), searchDur.Truncate(time.Microsecond))
 	for i, res := range results {
-		var meta iconMetadata
-		if raw, ok := idx.Metadata(res.ID); ok && len(raw) > 0 {
-			_ = json.Unmarshal(raw, &meta)
+		id := int(res.ID)
+		if id < 0 || id >= len(icons) {
+			continue
 		}
-		fmt.Printf("%2d. %-20s dist=%.4f\n", i+1, res.ID, res.Distance)
-		if meta.Title != "" {
-			fmt.Printf("    Title: %s\n", meta.Title)
+		info := icons[id]
+		fmt.Printf("%2d. %-20s dist=%.4f\n", i+1, info.Slug, res.Distance)
+		if info.Title != "" {
+			fmt.Printf("    Title: %s\n", info.Title)
 		}
-		if meta.Description != "" {
-			fmt.Printf("    Desc:  %s\n", truncate(meta.Description, 140))
+		if info.Description != "" {
+			fmt.Printf("    Desc:  %s\n", truncate(info.Description, 140))
 		}
 	}
 }
@@ -203,6 +279,7 @@ func runSearch(args []string) {
 func runBrute(args []string) {
 	fs := flag.NewFlagSet("brute", flag.ExitOnError)
 	indexPath := fs.String("index", "icons.ann", "Path to Annoy index file")
+	iconsPath := fs.String("icons", defaultIconsPath, "Path to icons.json for metadata")
 	query := fs.String("query", "", "Query text")
 	topK := fs.Int("top", 5, "Number of neighbours to return")
 	if err := fs.Parse(args); err != nil {
@@ -212,8 +289,13 @@ func runBrute(args []string) {
 		log.Fatal("brute: -query is required")
 	}
 
+	icons, err := loadIcons(*iconsPath)
+	if err != nil {
+		log.Fatalf("load icons: %v", err)
+	}
+
 	loadStart := time.Now()
-	idx, err := annoy.LoadFile(*indexPath)
+	idx, err := annoyindex.LoadFile(*indexPath)
 	if err != nil {
 		log.Fatalf("load index: %v", err)
 	}
@@ -224,32 +306,42 @@ func runBrute(args []string) {
 		log.Fatalf("index is empty")
 	}
 
+	rt, err := model.Open()
+	if err != nil {
+		log.Fatalf("open model: %v", err)
+	}
+	defer rt.Close()
+
 	ctx := context.Background()
 	embedStart := time.Now()
-	vec, err := idx.EmbedQuery(ctx, *query)
+	vec, err := rt.EmbedSingleInput(ctx, ggufembed.EmbedInput{
+		Task:    ggufembed.TaskSearchQuery,
+		Content: *query,
+		Dim:     idx.Dimension(),
+	})
 	if err != nil {
 		log.Fatalf("embed query: %v", err)
 	}
 	embedDur := time.Since(embedStart)
 
 	start := time.Now()
-	results := bruteForce(vec, items, idx.Metric(), "", *topK)
+	results := bruteForce(vec, items, idx.Metric(), -1, *topK)
 	elapsed := time.Since(start)
 
 	fmt.Printf("Brute-force search (%d items) load=%s embed=%s search=%s\n",
 		len(items), loadDur.Truncate(time.Millisecond), embedDur.Truncate(time.Millisecond), elapsed.Truncate(time.Microsecond))
 	for i, res := range results {
-		meta, _ := idx.Metadata(res.ID)
-		var metaStruct iconMetadata
-		if len(meta) > 0 {
-			_ = json.Unmarshal(meta, &metaStruct)
+		id := int(res.ID)
+		if id < 0 || id >= len(icons) {
+			continue
 		}
-		fmt.Printf("%2d. %-20s dist=%.4f\n", i+1, res.ID, res.Distance)
-		if metaStruct.Title != "" {
-			fmt.Printf("    Title: %s\n", metaStruct.Title)
+		info := icons[id]
+		fmt.Printf("%2d. %-20s dist=%.4f\n", i+1, info.Slug, res.Distance)
+		if info.Title != "" {
+			fmt.Printf("    Title: %s\n", info.Title)
 		}
-		if metaStruct.Description != "" {
-			fmt.Printf("    Desc:  %s\n", truncate(metaStruct.Description, 140))
+		if info.Description != "" {
+			fmt.Printf("    Desc:  %s\n", truncate(info.Description, 140))
 		}
 	}
 }
@@ -264,7 +356,7 @@ func runEval(args []string) {
 		log.Fatal(err)
 	}
 
-	idx, err := annoy.LoadFile(*indexPath)
+	idx, err := annoyindex.LoadFile(*indexPath)
 	if err != nil {
 		log.Fatalf("load index: %v", err)
 	}
@@ -294,13 +386,13 @@ func runEval(args []string) {
 		bruteTime += time.Since(startBF)
 
 		startAnn := time.Now()
-		res, err := idx.SearchVector(query.vec, searchTop, annoy.WithSearchK(*searchK))
+		res, err := idx.SearchVector(query.vec, searchTop, search.WithSearchK(*searchK))
 		if err != nil {
 			log.Fatalf("search vector: %v", err)
 		}
 		annoyTime += time.Since(startAnn)
 
-		filtered := make([]annoy.Result, 0, len(res))
+		filtered := make([]search.Result, 0, len(res))
 		for _, cand := range res {
 			if cand.ID == query.id {
 				continue
@@ -322,26 +414,27 @@ func runEval(args []string) {
 }
 
 type evalItem struct {
-	id  string
+	id  int32
 	vec []float32
 }
 
-func collectItems(idx *annoy.Index) []evalItem {
-	items := make([]evalItem, 0, len(idx.Items()))
-	idx.ForEachVector(func(id string, vec []float32) {
+func collectItems(idx *annoyindex.Index) []evalItem {
+	items := make([]evalItem, 0, idx.Count())
+	idx.ForEach(func(id int32, vec []float32) {
 		copyVec := append([]float32(nil), vec...)
 		items = append(items, evalItem{id: id, vec: copyVec})
 	})
+	sort.Slice(items, func(i, j int) bool { return items[i].id < items[j].id })
 	return items
 }
 
-func bruteForce(query []float32, items []evalItem, metric annoy.Metric, exclude string, topK int) []annoy.Result {
+func bruteForce(query []float32, items []evalItem, metric annoyindex.Metric, exclude int32, topK int) []search.Result {
 	q := append([]float32(nil), query...)
-	if metric == annoy.Cosine {
+	if metric == annoyindex.Cosine {
 		normalizeVec(q)
 	}
 	type scored struct {
-		id   string
+		id   int32
 		dist float32
 	}
 	scoredList := make([]scored, 0, len(items))
@@ -361,18 +454,18 @@ func bruteForce(query []float32, items []evalItem, metric annoy.Metric, exclude 
 	if topK > len(scoredList) {
 		topK = len(scoredList)
 	}
-	results := make([]annoy.Result, topK)
+	results := make([]search.Result, topK)
 	for i := 0; i < topK; i++ {
-		results[i] = annoy.Result{ID: scoredList[i].id, Distance: scoredList[i].dist}
+		results[i] = search.Result{ID: scoredList[i].id, Distance: scoredList[i].dist}
 	}
 	return results
 }
 
-func recallAtK(truth, approx []annoy.Result) float64 {
+func recallAtK(truth, approx []search.Result) float64 {
 	if len(truth) == 0 {
 		return 0
 	}
-	set := make(map[string]struct{}, len(truth))
+	set := make(map[int32]struct{}, len(truth))
 	for _, res := range truth {
 		set[res.ID] = struct{}{}
 	}
@@ -403,41 +496,14 @@ func normalizeVec(v []float32) {
 	}
 }
 
-type icon struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-}
-
-type iconMetadata struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-}
-
-type iconFile struct {
-	Icons []icon `json:"icons"`
-}
-
-func loadIcons(path string) ([]icon, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var file iconFile
-	if err := json.Unmarshal(data, &file); err != nil {
-		return nil, err
-	}
-	return file.Icons, nil
-}
-
 func truncate(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
-	return s[:max] + "…"
+	return s[:max] + "..."
 }
 
-func newProgressPrinter() annoy.ProgressFunc {
+func newProgressPrinter() annoyindex.ProgressFunc {
 	var mu sync.Mutex
 	var lastStage string
 	return func(stage string, current, total int) {
@@ -458,4 +524,32 @@ func newProgressPrinter() annoy.ProgressFunc {
 			fmt.Println()
 		}
 	}
+}
+
+func loadIcons(path string) ([]iconInfo, error) {
+	type raw struct {
+		Icons []struct {
+			ID          string `json:"id"`
+			Title       string `json:"title"`
+			Description string `json:"description"`
+		} `json:"icons"`
+	}
+
+	abspath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(abspath)
+	if err != nil {
+		return nil, err
+	}
+	var file raw
+	if err := json.Unmarshal(data, &file); err != nil {
+		return nil, err
+	}
+	icons := make([]iconInfo, len(file.Icons))
+	for i, icon := range file.Icons {
+		icons[i] = iconInfo{Slug: icon.ID, Title: icon.Title, Description: icon.Description}
+	}
+	return icons, nil
 }
