@@ -148,6 +148,7 @@ func runSearch(args []string) {
 	indexPath := fs.String("index", "icons.ann", "Path to Annoy index file")
 	query := fs.String("query", "", "Query text")
 	topK := fs.Int("top", 5, "Number of neighbours to return")
+	searchK := fs.Int("searchk", 0, "search_k override (default: trees * top)")
 	if err := fs.Parse(args); err != nil {
 		log.Fatal(err)
 	}
@@ -164,7 +165,11 @@ func runSearch(args []string) {
 
 	ctx := context.Background()
 	searchStart := time.Now()
-	results, err := idx.SearchText(ctx, *query, *topK, annoy.WithMetadata())
+	opts := []annoy.SearchOption{annoy.WithMetadata()}
+	if *searchK > 0 {
+		opts = append(opts, annoy.WithSearchK(*searchK))
+	}
+	results, err := idx.SearchText(ctx, *query, *topK, opts...)
 	if err != nil {
 		log.Fatalf("search: %v", err)
 	}
@@ -261,6 +266,8 @@ func runEval(args []string) {
 		n = len(items)
 	}
 
+	searchTop := *topK + 1
+
 	fmt.Printf("Evaluating %d queries (top=%d searchK=%d)\n", n, *topK, *searchK)
 
 	var annoyTime, bruteTime time.Duration
@@ -274,13 +281,24 @@ func runEval(args []string) {
 		bruteTime += time.Since(startBF)
 
 		startAnn := time.Now()
-		res, err := idx.SearchVector(query.vec, *topK, annoy.WithSearchK(*searchK))
+		res, err := idx.SearchVector(query.vec, searchTop, annoy.WithSearchK(*searchK))
 		if err != nil {
 			log.Fatalf("search vector: %v", err)
 		}
 		annoyTime += time.Since(startAnn)
 
-		recall := recallAtK(brute, res)
+		filtered := make([]annoy.Result, 0, len(res))
+		for _, cand := range res {
+			if cand.ID == query.id {
+				continue
+			}
+			filtered = append(filtered, cand)
+			if len(filtered) == *topK {
+				break
+			}
+		}
+
+		recall := recallAtK(brute, filtered)
 		recallSum += recall
 	}
 
