@@ -308,12 +308,15 @@ func runBatchMode(rt ggufembed.Runtime) (int, time.Duration, time.Duration) {
 		default:
 		}
 
-		selectedTexts := make([]string, *batchSize)
+		inputs := make([]ggufembed.EmbedInput, *batchSize)
 		for i := 0; i < *batchSize; i++ {
-			selectedTexts[i] = testTexts[rand.Intn(len(testTexts))]
+			inputs[i] = ggufembed.EmbedInput{
+				Task:    ggufembed.TaskNone,
+				Content: testTexts[rand.Intn(len(testTexts))],
+			}
 		}
 
-		_, err := rt.Embed(ctx, selectedTexts)
+		_, err := rt.EmbedInputs(ctx, inputs)
 		if err != nil {
 			if ctx.Err() != nil {
 				return computeReturn(totalEmbeddings)
@@ -322,7 +325,7 @@ func runBatchMode(rt ggufembed.Runtime) (int, time.Duration, time.Duration) {
 			continue
 		}
 
-		totalEmbeddings += len(selectedTexts)
+		totalEmbeddings += len(inputs)
 	}
 }
 
@@ -409,9 +412,9 @@ func worker(ctx context.Context, workerID int, wg *sync.WaitGroup, results chan<
 		// Select random text from corpus
 		text := testTexts[rand.Intn(len(testTexts))]
 
-		// Generate single embedding as a query-style prompt.
+		// Generate single embedding without modifying the content.
 		_, err := rt.EmbedSingleInput(ctx, ggufembed.EmbedInput{
-			Task:    ggufembed.TaskSearchQuery,
+			Task:    ggufembed.TaskNone,
 			Content: text,
 		})
 		if err != nil {
@@ -531,8 +534,7 @@ func measureIdleMemory(rt ggufembed.Runtime) uint64 {
 
 func documentInput(content string) ggufembed.EmbedInput {
 	return ggufembed.EmbedInput{
-		Task:    ggufembed.TaskSearchDocument,
-		Title:   "none",
+		Task:    ggufembed.TaskNone,
 		Content: content,
 	}
 }
