@@ -14,6 +14,7 @@ import (
 	"math"
 
 	"github.com/lth/pure-go-llamas/model"
+	"github.com/lth/pure-go-llamas/pkg/ggufembed"
 )
 
 func main() {
@@ -38,7 +39,10 @@ func main() {
 	embeddings := make([][]float32, len(sentences))
 
 	for i, sentence := range sentences {
-		embedding, err := rt.EmbedSingle(ctx, sentence)
+		embedding, err := rt.EmbedSingleInput(ctx, ggufembed.EmbedInput{
+			Task:    ggufembed.TaskSemanticSimilarity,
+			Content: sentence,
+		})
 		if err != nil {
 			log.Fatalf("Failed to embed sentence %d: %v", i, err)
 		}

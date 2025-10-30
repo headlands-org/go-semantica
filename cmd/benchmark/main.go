@@ -409,8 +409,11 @@ func worker(ctx context.Context, workerID int, wg *sync.WaitGroup, results chan<
 		// Select random text from corpus
 		text := testTexts[rand.Intn(len(testTexts))]
 
-		// Generate single embedding
-		_, err := rt.EmbedSingle(ctx, text)
+		// Generate single embedding as a query-style prompt.
+		_, err := rt.EmbedSingleInput(ctx, ggufembed.EmbedInput{
+			Task:    ggufembed.TaskSearchQuery,
+			Content: text,
+		})
 		if err != nil {
 			// Check if error is due to context cancellation
 			if ctx.Err() != nil {
@@ -526,11 +529,19 @@ func measureIdleMemory(rt ggufembed.Runtime) uint64 {
 	return m.HeapAlloc
 }
 
+func documentInput(content string) ggufembed.EmbedInput {
+	return ggufembed.EmbedInput{
+		Task:    ggufembed.TaskSearchDocument,
+		Title:   "none",
+		Content: content,
+	}
+}
+
 // warmup runs warmup embeddings to warm up caches
 func warmup(rt ggufembed.Runtime, doc string) {
 	ctx := context.Background()
 	for i := 0; i < 5; i++ {
-		_, _ = rt.EmbedSingle(ctx, doc)
+		_, _ = rt.EmbedSingleInput(ctx, documentInput(doc))
 	}
 }
 
@@ -577,10 +588,12 @@ func measureSingleDocLatency(rt ggufembed.Runtime, doc string) LatencyStats {
 	latencies := make([]float64, numRuns)
 	compute := make([]float64, numRuns)
 
+	input := documentInput(doc)
+
 	for i := 0; i < numRuns; i++ {
 		cpuBefore := cpuTimeNow()
 		start := time.Now()
-		_, err := rt.EmbedSingle(ctx, doc)
+		_, err := rt.EmbedSingleInput(ctx, input)
 		cpuAfter := cpuTimeNow()
 		if err != nil {
 			log.Printf("Warning: embedding failed during latency test: %v", err)
@@ -645,20 +658,20 @@ func measureThroughput(rt ggufembed.Runtime, docs []string, batchSizeOverride in
 	totalEmbeddings := 0
 
 	for time.Now().Before(deadline) {
-		// Select batch-size random texts from docs
-		selectedTexts := make([]string, batchSizeOverride)
+		// Select batch-size random texts from docs and build document prompts.
+		inputs := make([]ggufembed.EmbedInput, batchSizeOverride)
 		for i := 0; i < batchSizeOverride; i++ {
-			selectedTexts[i] = docs[rand.Intn(len(docs))]
+			inputs[i] = documentInput(docs[rand.Intn(len(docs))])
 		}
 
 		// Generate embeddings
-		_, err := rt.Embed(ctx, selectedTexts)
+		_, err := rt.EmbedInputs(ctx, inputs)
 		if err != nil {
 			log.Printf("Warning: embedding failed during throughput test: %v", err)
 			continue
 		}
 
-		totalEmbeddings += len(selectedTexts)
+		totalEmbeddings += len(inputs)
 	}
 
 	actualDuration := time.Since(startTime).Seconds()
@@ -860,10 +873,12 @@ func measureSingleDocLatencyPrecise(rt ggufembed.Runtime, doc string, numRuns in
 	latencies := make([]float64, numRuns)
 	compute := make([]float64, numRuns)
 
+	input := documentInput(doc)
+
 	for i := 0; i < numRuns; i++ {
 		cpuBefore := cpuTimeNow()
 		start := time.Now()
-		_, err := rt.EmbedSingle(ctx, doc)
+		_, err := rt.EmbedSingleInput(ctx, input)
 		cpuAfter := cpuTimeNow()
 		if err != nil {
 			log.Printf("Warning: embedding failed during latency test: %v", err)

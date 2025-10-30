@@ -12,10 +12,17 @@ import (
 
 // Runtime is the main interface for the embedding runtime
 type Runtime interface {
-	// Embed generates embeddings for the given texts
+	// EmbedInputs generates embeddings for the given inputs, applying the
+	// appropriate prompt for each task.
+	EmbedInputs(ctx context.Context, inputs []EmbedInput) ([][]float32, error)
+
+	// Embed generates embeddings for the given texts using TaskSearchQuery prompts.
 	Embed(ctx context.Context, texts []string) ([][]float32, error)
 
-	// EmbedSingle generates an embedding for a single text
+	// EmbedSingleInput embeds a single task-aware input.
+	EmbedSingleInput(ctx context.Context, input EmbedInput) ([]float32, error)
+
+	// EmbedSingle generates an embedding for a single text using TaskSearchQuery prompts.
 	EmbedSingle(ctx context.Context, text string) ([]float32, error)
 
 	// Close releases resources
@@ -138,75 +145,42 @@ func (r *embedRuntime) Embed(ctx context.Context, texts []string) ([][]float32, 
 		return nil, nil
 	}
 
-	results := make([][]float32, len(texts))
-	errors := make([]error, len(texts))
-
-	// Simple worker selection: use all available cores
-	workers := runtime.NumCPU()
-	if len(texts) < workers {
-		workers = len(texts)
-	}
-
-	// Distribute work evenly across workers
-	textsPerWorker := (len(texts) + workers - 1) / workers
-
-	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
-		start := w * textsPerWorker
-		end := start + textsPerWorker
-		if end > len(texts) {
-			end = len(texts)
-		}
-		if start >= len(texts) {
-			break
-		}
-
-		wg.Add(1)
-		go func(start, end int) {
-			defer wg.Done()
-
-			for i := start; i < end; i++ {
-				// Check context cancellation
-				select {
-				case <-ctx.Done():
-					errors[i] = ctx.Err()
-					return
-				default:
-				}
-
-				// Embed single text (model is thread-safe for concurrent access)
-				embedding, err := r.embedSingle(texts[i])
-				if err != nil {
-					errors[i] = err
-				} else {
-					results[i] = embedding
-				}
-			}
-		}(start, end)
-	}
-
-	wg.Wait()
-
-	// Return first error encountered
-	for _, err := range errors {
-		if err != nil {
-			return results, err
+	inputs := make([]EmbedInput, len(texts))
+	for i, text := range texts {
+		inputs[i] = EmbedInput{
+			Task:    TaskSearchQuery,
+			Content: text,
 		}
 	}
-
-	return results, nil
+	return r.EmbedInputs(ctx, inputs)
 }
 
-// min returns the minimum of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-// EmbedSingle generates an embedding for a single text
+// EmbedSingle generates an embedding for a single text using TaskSearchQuery prompts.
 func (r *embedRuntime) EmbedSingle(ctx context.Context, text string) ([]float32, error) {
+	return r.EmbedSingleInput(ctx, EmbedInput{
+		Task:    TaskSearchQuery,
+		Content: text,
+	})
+}
+
+func (r *embedRuntime) EmbedInputs(ctx context.Context, inputs []EmbedInput) ([][]float32, error) {
+	if len(inputs) == 0 {
+		return nil, nil
+	}
+
+	prompts := make([]string, len(inputs))
+	for i, in := range inputs {
+		prompt, err := in.prompt()
+		if err != nil {
+			return nil, fmt.Errorf("build prompt for input %d: %w", i, err)
+		}
+		prompts[i] = prompt
+	}
+
+	return r.embedPrompts(ctx, prompts)
+}
+
+func (r *embedRuntime) EmbedSingleInput(ctx context.Context, input EmbedInput) ([]float32, error) {
 	// Check context
 	select {
 	case <-ctx.Done():
@@ -214,11 +188,16 @@ func (r *embedRuntime) EmbedSingle(ctx context.Context, text string) ([]float32,
 	default:
 	}
 
-	return r.embedSingle(text)
+	prompt, err := input.prompt()
+	if err != nil {
+		return nil, err
+	}
+
+	return r.embedPrompt(prompt)
 }
 
 // embedSingle is the internal implementation
-func (r *embedRuntime) embedSingle(text string) ([]float32, error) {
+func (r *embedRuntime) embedPrompt(text string) ([]float32, error) {
 	// Tokenize
 	tokenIDs, err := r.model.Tokenizer().Encode(text)
 	if err != nil {
@@ -237,6 +216,65 @@ func (r *embedRuntime) embedSingle(text string) ([]float32, error) {
 	}
 
 	return embedding, nil
+}
+
+func (r *embedRuntime) embedPrompts(ctx context.Context, prompts []string) ([][]float32, error) {
+	if len(prompts) == 0 {
+		return nil, nil
+	}
+
+	results := make([][]float32, len(prompts))
+	errors := make([]error, len(prompts))
+
+	workers := runtime.NumCPU()
+	if len(prompts) < workers {
+		workers = len(prompts)
+	}
+
+	promptsPerWorker := (len(prompts) + workers - 1) / workers
+
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		start := w * promptsPerWorker
+		end := start + promptsPerWorker
+		if end > len(prompts) {
+			end = len(prompts)
+		}
+		if start >= len(prompts) {
+			break
+		}
+
+		wg.Add(1)
+		go func(start, end int) {
+			defer wg.Done()
+
+			for i := start; i < end; i++ {
+				select {
+				case <-ctx.Done():
+					errors[i] = ctx.Err()
+					return
+				default:
+				}
+
+				embedding, err := r.embedPrompt(prompts[i])
+				if err != nil {
+					errors[i] = err
+				} else {
+					results[i] = embedding
+				}
+			}
+		}(start, end)
+	}
+
+	wg.Wait()
+
+	for _, err := range errors {
+		if err != nil {
+			return results, err
+		}
+	}
+
+	return results, nil
 }
 
 // Close releases resources

@@ -8,6 +8,101 @@ import (
 
 const gemmaModelPath = "../../model/embeddinggemma-300m-Q8_0.gguf"
 
+func TestBuildPromptMatchesModelCard(t *testing.T) {
+	const content = "neural networks are powerful"
+
+	tests := []struct {
+		name    string
+		input   EmbedInput
+		want    string
+		wantErr bool
+	}{
+		{
+			name:  "TaskNone",
+			input: EmbedInput{Task: TaskNone, Content: content},
+			want:  content,
+		},
+		{
+			name:  "Search query",
+			input: EmbedInput{Task: TaskSearchQuery, Content: content},
+			want:  "task: search result | query: " + content,
+		},
+		{
+			name:  "Question answering",
+			input: EmbedInput{Task: TaskQuestionAnswering, Content: content},
+			want:  "task: question answering | query: " + content,
+		},
+		{
+			name:  "Fact verification",
+			input: EmbedInput{Task: TaskFactVerification, Content: content},
+			want:  "task: fact checking | query: " + content,
+		},
+		{
+			name:  "Classification",
+			input: EmbedInput{Task: TaskClassification, Content: content},
+			want:  "task: classification | query: " + content,
+		},
+		{
+			name:  "Clustering",
+			input: EmbedInput{Task: TaskClustering, Content: content},
+			want:  "task: clustering | query: " + content,
+		},
+		{
+			name:  "Semantic similarity",
+			input: EmbedInput{Task: TaskSemanticSimilarity, Content: content},
+			want:  "task: sentence similarity | query: " + content,
+		},
+		{
+			name:  "Code retrieval",
+			input: EmbedInput{Task: TaskCodeRetrieval, Content: content},
+			want:  "task: code retrieval | query: " + content,
+		},
+		{
+			name:  "Document with title",
+			input: EmbedInput{Task: TaskSearchDocument, Title: "Doc", Content: content},
+			want:  "title: Doc | text: " + content,
+		},
+		{
+			name:  "Document default title",
+			input: EmbedInput{Task: TaskSearchDocument, Content: content},
+			want:  "title: none | text: " + content,
+		},
+		{
+			name:  "Custom description",
+			input: EmbedInput{Task: TaskSemanticSimilarity, Content: content, CustomTaskDescription: "custom"},
+			want:  "task: custom | query: " + content,
+		},
+		{
+			name:    "Missing content",
+			input:   EmbedInput{Task: TaskSearchQuery},
+			wantErr: true,
+		},
+		{
+			name:    "Unknown task",
+			input:   EmbedInput{Task: Task(42), Content: content},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := BuildPrompt(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("prompt mismatch: want %q, got %q", tc.want, got)
+			}
+		})
+	}
+}
+
 // TestBasicEmbedding verifies that basic embedding generation works correctly
 func TestBasicEmbedding(t *testing.T) {
 	// Open runtime
@@ -93,7 +188,12 @@ func TestBatchProcessing(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			embeddings, err := rt.Embed(ctx, tc.texts)
+			inputs := make([]EmbedInput, len(tc.texts))
+			for i, text := range tc.texts {
+				inputs[i] = EmbedInput{Task: TaskSearchDocument, Content: text}
+			}
+
+			embeddings, err := rt.EmbedInputs(ctx, inputs)
 			if err != nil {
 				t.Fatalf("Failed to embed: %v", err)
 			}
@@ -142,21 +242,21 @@ func TestExplicitThreadCount(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a batch
-	texts := make([]string, 64)
-	for i := range texts {
-		texts[i] = "Test text"
+	inputs := make([]EmbedInput, 64)
+	for i := range inputs {
+		inputs[i] = EmbedInput{Task: TaskSearchDocument, Content: "Test text"}
 	}
 
-	embeddings, err := rt.Embed(ctx, texts)
+	embeddings, err := rt.EmbedInputs(ctx, inputs)
 	if err != nil {
 		t.Fatalf("Failed to embed: %v", err)
 	}
 
-	if len(embeddings) != len(texts) {
-		t.Errorf("Expected %d embeddings, got %d", len(texts), len(embeddings))
+	if len(embeddings) != len(inputs) {
+		t.Errorf("Expected %d embeddings, got %d", len(inputs), len(embeddings))
 	}
 
-	t.Logf("Successfully processed %d texts with explicit thread count of 2", len(texts))
+	t.Logf("Successfully processed %d texts with explicit thread count of 2", len(inputs))
 }
 
 // TestConsistency verifies that multiple runs produce identical results

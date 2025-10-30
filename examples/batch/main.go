@@ -45,11 +45,20 @@ func main() {
 
 	fmt.Printf("Processing %d texts in batch...\n", len(texts))
 
-	// Generate embeddings in batch - this is parallelized automatically
+	// Generate embeddings in batch using document-optimised prompts.
+	inputs := make([]ggufembed.EmbedInput, len(texts))
+	for i, text := range texts {
+		inputs[i] = ggufembed.EmbedInput{
+			Task:    ggufembed.TaskSearchDocument,
+			Title:   "none",
+			Content: text,
+		}
+	}
+
 	ctx := context.Background()
 	start := time.Now()
 
-	embeddings, err := rt.Embed(ctx, texts)
+	embeddings, err := rt.EmbedInputs(ctx, inputs)
 	if err != nil {
 		log.Fatalf("Failed to generate batch embeddings: %v", err)
 	}

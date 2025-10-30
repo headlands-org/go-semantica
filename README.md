@@ -20,7 +20,21 @@ if err != nil {
 }
 defer rt.Close()
 
-embedding, err := rt.EmbedSingle(ctx, "Hello, world!")
+embedding, err := rt.EmbedSingleInput(ctx, ggufembed.EmbedInput{
+    Task:    ggufembed.TaskSearchQuery,
+    Content: "Hello, world!",
+})
+
+// Supported tasks (per the EmbeddingGemma model card):
+//   TaskSearchQuery        -> "task: search result | query: ..."
+//   TaskSearchDocument     -> "title: {title|\"none\"} | text: ..."
+//   TaskQuestionAnswering  -> "task: question answering | query: ..."
+//   TaskFactVerification   -> "task: fact checking | query: ..."
+//   TaskClassification     -> "task: classification | query: ..."
+//   TaskClustering         -> "task: clustering | query: ..."
+//   TaskSemanticSimilarity -> "task: sentence similarity | query: ..."
+//   TaskCodeRetrieval      -> "task: code retrieval | query: ..."
+//   TaskNone               -> leaves the content unchanged.
 if err != nil {
     log.Fatal(err)
 }
