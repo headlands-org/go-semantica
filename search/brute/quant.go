@@ -58,7 +58,11 @@ var int8ToFloat32 = func() [256]float32 {
 	const scale = 1.0 / 127.0
 	var lut [256]float32
 	for i := 0; i < 256; i++ {
-		lut[i] = float32(int8(i-128)) * scale
+		v := int8(i)
+		if v < -127 {
+			v = -127
+		}
+		lut[i] = float32(v) * scale
 	}
 	return lut
 }()
