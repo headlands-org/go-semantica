@@ -104,6 +104,8 @@ We benchmarked 500 random queries against the Hugeicons dataset (4 495 items).
 All measurements were captured with `go run ./examples/search` (building binaries ahead of time and reusing the cached indexes). The brute-force index stores pre-normalised vectors, so search time scales linearly with dimensionality while quantization controls disk/RAM footprint.
 
 > **Note:** On amd64 hosts with AVX2 the dot-product kernels automatically vectorise; other architectures use the portable scalar fallback.
+>
+> To regenerate the table, run `go run ./cmd/brute-eval -icons ../one/go/hugeicons/icons.json`. The tool embeds the dataset once, evaluates every dimension/quant pair, and prints either Markdown or CSV (see `-h` for flags).
 
 ## Runtime performance vs. llama.cpp
 
