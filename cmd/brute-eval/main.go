@@ -327,11 +327,11 @@ func normalizeVec(v []float32) {
 }
 
 func printMarkdown(metrics []metric) {
-	fmt.Println("| Dim | Quant | Index Size | Avg Search (ms) | Recall vs 768 fp32 | Recall Loss |")
-	fmt.Println("|-----|-------|------------|-----------------|--------------------|-------------|")
+	fmt.Println("| Dim | Quant | Index Size | Avg Search (ms) | Recall vs 768fp32 | Recall Loss |")
+	fmt.Println("|-----|-------|------------|-----------------|-------------------|-------------|")
 	for _, m := range metrics {
 		loss := 100.0 - m.recallPct
-		fmt.Printf("| %3d | %-5s | %6.2f MB | %7.2f | %6.2f %% | %6.2f %% |\n",
+		fmt.Printf("| %3d | %-5s | %6.2f MB | %7.2f | %6.2f %% | %6.2f %% |\n",
 			m.dimension,
 			m.quantLabel,
 			float64(m.indexBytes)/(1024.0*1024.0),
