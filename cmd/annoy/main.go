@@ -212,10 +212,12 @@ func runBrute(args []string) {
 		log.Fatal("brute: -query is required")
 	}
 
+	loadStart := time.Now()
 	idx, err := annoy.LoadFile(*indexPath)
 	if err != nil {
 		log.Fatalf("load index: %v", err)
 	}
+	loadDur := time.Since(loadStart)
 
 	items := collectItems(idx)
 	if len(items) == 0 {
@@ -234,8 +236,8 @@ func runBrute(args []string) {
 	results := bruteForce(vec, items, idx.Metric(), "", *topK)
 	elapsed := time.Since(start)
 
-	fmt.Printf("Brute-force search (%d items) embed=%s search=%s\n",
-		len(items), embedDur.Truncate(time.Millisecond), elapsed.Truncate(time.Microsecond))
+	fmt.Printf("Brute-force search (%d items) load=%s embed=%s search=%s\n",
+		len(items), loadDur.Truncate(time.Millisecond), embedDur.Truncate(time.Millisecond), elapsed.Truncate(time.Microsecond))
 	for i, res := range results {
 		meta, _ := idx.Metadata(res.ID)
 		var metaStruct iconMetadata
