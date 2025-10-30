@@ -91,17 +91,19 @@ We benchmarked 500 random queries against the Hugeicons dataset (4 495 items).
 
 | Dim | Quant | Index Size | Avg Search (ms) | Recall vs 768 fp32 | Recall Loss |
 |-----|-------|------------|-----------------|--------------------|-------------|
-| 768 | fp32  | 13.2 MB    | 2.34            | 100.00 %           | 0.00 %      |
-| 768 | int16 | 6.6 MB     | 2.50            | 99.98 %            | 0.02 %      |
-| 768 | int8  | 3.3 MB     | 2.52            | 95.04 %            | 4.96 %      |
-| 512 | int16 | 4.4 MB     | 1.83            | 89.18 %            | 10.82 %     |
-| 512 | int8  | 2.2 MB     | 1.85            | 88.32 %            | 11.68 %     |
-| 256 | int16 | 2.2 MB     | 1.15            | 78.20 %            | 21.80 %     |
-| 256 | int8  | 1.1 MB     | 1.15            | 77.76 %            | 22.24 %     |
-| 128 | int16 | 1.1 MB     | 0.79            | 66.46 %            | 33.54 %     |
-| 128 | int8  | 0.57 MB    | 0.79            | 66.40 %            | 33.60 %     |
+| 768 | fp32  | 13.2 MB    | 1.88            | 100.00 %           | 0.00 %      |
+| 768 | int16 | 6.6 MB     | 0.25            | 99.96 %            | 0.04 %      |
+| 768 | int8  | 3.3 MB     | 0.25            | 95.14 %            | 4.86 %      |
+| 512 | int16 | 4.4 MB     | 0.17            | 88.86 %            | 11.14 %     |
+| 512 | int8  | 2.2 MB     | 0.17            | 87.76 %            | 12.24 %     |
+| 256 | int16 | 2.2 MB     | 0.10            | 76.86 %            | 23.14 %     |
+| 256 | int8  | 1.1 MB     | 0.10            | 76.54 %            | 23.46 %     |
+| 128 | int16 | 1.1 MB     | 0.06            | 64.02 %            | 35.98 %     |
+| 128 | int8  | 0.57 MB    | 0.06            | 64.20 %            | 35.80 %     |
 
 All measurements were captured with `go run ./examples/search` (building binaries ahead of time and reusing the cached indexes). The brute-force index stores pre-normalised vectors, so search time scales linearly with dimensionality while quantization controls disk/RAM footprint.
+
+> **Note:** On amd64 hosts with AVX2 the dot-product kernels automatically vectorise; other architectures use the portable scalar fallback.
 
 ## Runtime performance vs. llama.cpp
 
