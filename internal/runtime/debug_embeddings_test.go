@@ -1,5 +1,3 @@
-// +build integration
-
 package runtime
 
 import (
@@ -39,7 +37,7 @@ func TestDebugTokenEmbeddings(t *testing.T) {
 	}
 
 	// Manually compute scaled embeddings
-	scaleFactor := float32(27.71281)  // sqrt(768)
+	scaleFactor := float32(27.71281) // sqrt(768)
 	t.Logf("\nInput scaling factor: %.5f (sqrt(%d))", scaleFactor, embDim)
 
 	// Check token ID=2 embedding after scaling
