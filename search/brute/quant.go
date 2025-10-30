@@ -67,6 +67,19 @@ var int8ToFloat32 = func() [256]float32 {
 	return lut
 }()
 
+var int16ToFloat32 = func() [65536]float32 {
+	const scale = 1.0 / 32767.0
+	var lut [65536]float32
+	for i := 0; i < 65536; i++ {
+		v := int16(i)
+		if v < -32767 {
+			v = -32767
+		}
+		lut[i] = float32(v) * scale
+	}
+	return lut
+}()
+
 func dotInt8(vec []int8, query []float32, dim int) float32 {
 	sum0, sum1, sum2, sum3 := float32(0), float32(0), float32(0), float32(0)
 	i := 0
@@ -84,10 +97,17 @@ func dotInt8(vec []int8, query []float32, dim int) float32 {
 }
 
 func dotInt16(vec []int16, query []float32, dim int) float32 {
-	const scale = 1.0 / 32767.0
-	sum := float32(0)
-	for i := 0; i < dim; i++ {
-		sum += query[i] * float32(vec[i]) * scale
+	sum0, sum1, sum2, sum3 := float32(0), float32(0), float32(0), float32(0)
+	i := 0
+	for ; i+4 <= dim; i += 4 {
+		sum0 += query[i] * int16ToFloat32[uint16(vec[i])]
+		sum1 += query[i+1] * int16ToFloat32[uint16(vec[i+1])]
+		sum2 += query[i+2] * int16ToFloat32[uint16(vec[i+2])]
+		sum3 += query[i+3] * int16ToFloat32[uint16(vec[i+3])]
+	}
+	sum := sum0 + sum1 + sum2 + sum3
+	for ; i < dim; i++ {
+		sum += query[i] * int16ToFloat32[uint16(vec[i])]
 	}
 	return sum
 }
