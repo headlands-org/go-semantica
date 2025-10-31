@@ -4,7 +4,7 @@
 #
 # NOTE: This script measures llama.cpp's actual INFERENCE time only,
 # using its internal "prompt eval time" metric. This excludes model
-# loading and other overhead for fair comparison with pure-go-llamas.
+# loading and other overhead for fair comparison with go-semantica.
 
 set -e
 
@@ -178,5 +178,5 @@ echo ""
 echo "Note: For batch scenarios, llama.cpp would need a custom harness"
 echo "that calls the embedding API multiple times in parallel."
 echo ""
-echo "Comparison with pure-go-llamas:"
+echo "Comparison with go-semantica:"
 echo "  Run: ./benchmark -model=$MODEL_PATH -mode=comprehensive"

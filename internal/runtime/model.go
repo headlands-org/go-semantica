@@ -7,9 +7,9 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/lth/pure-go-llamas/internal/gguf"
-	"github.com/lth/pure-go-llamas/internal/kernels"
-	"github.com/lth/pure-go-llamas/internal/tokenizer"
+	"github.com/headlands-org/go-semantica/internal/gguf"
+	"github.com/headlands-org/go-semantica/internal/kernels"
+	"github.com/headlands-org/go-semantica/internal/tokenizer"
 )
 
 // ModelConfig holds model hyperparameters

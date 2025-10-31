@@ -1,4 +1,4 @@
-module github.com/lth/pure-go-llamas
+module github.com/headlands-org/go-semantica
 
 go 1.25.3
 

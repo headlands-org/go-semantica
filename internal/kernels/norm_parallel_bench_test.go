@@ -8,13 +8,13 @@ import (
 // BenchmarkRMSNormSizes measures RMSNorm performance across different vector sizes
 func BenchmarkRMSNormSizes(b *testing.B) {
 	sizes := []int{
-		128,   // Small embedding
-		256,   // Small
-		512,   // Medium
-		1024,  // Medium-large
-		2048,  // Large (common for Gemma)
-		4096,  // Very large
-		8192,  // Extra large
+		128,  // Small embedding
+		256,  // Small
+		512,  // Medium
+		1024, // Medium-large
+		2048, // Large (common for Gemma)
+		4096, // Very large
+		8192, // Extra large
 	}
 
 	for _, n := range sizes {
@@ -44,14 +44,14 @@ func BenchmarkRMSNormBatchSizes(b *testing.B) {
 		batchSize int
 		dim       int
 	}{
-		{1, 2048},   // Single item, typical dim
-		{4, 2048},   // Small batch
-		{8, 2048},   // Medium batch
-		{16, 2048},  // Large batch
-		{32, 2048},  // Very large batch
-		{1, 4096},   // Single item, large dim
-		{4, 4096},   // Small batch, large dim
-		{16, 4096},  // Large batch, large dim
+		{1, 2048},  // Single item, typical dim
+		{4, 2048},  // Small batch
+		{8, 2048},  // Medium batch
+		{16, 2048}, // Large batch
+		{32, 2048}, // Very large batch
+		{1, 4096},  // Single item, large dim
+		{4, 4096},  // Small batch, large dim
+		{16, 4096}, // Large batch, large dim
 	}
 
 	for _, cfg := range configs {

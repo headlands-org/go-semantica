@@ -1,3 +1,4 @@
+//go:build integration
 // +build integration
 
 package tokenizer
@@ -5,7 +6,7 @@ package tokenizer
 import (
 	"testing"
 
-	"github.com/lth/pure-go-llamas/internal/gguf"
+	"github.com/headlands-org/go-semantica/internal/gguf"
 )
 
 const gemmaModelPath = "../../model/embeddinggemma-300m-Q8_0.gguf"

@@ -1,18 +1,17 @@
-# Pure-Go Gemma Embedding & Search Stack
+# go-semantica: Gemma Embedding & Search Stack
 
-`pure-go-llamas` is a batteries-included, CPU-only embedding stack written in Go. It ships with:
+`go-semantica` is a batteries-included, CPU-only embedding stack written in Go. It ships with:
 
 - **EmbeddingGemma 300M** bundled via `go:embed`, so binaries can carry the model with no external files.
 - **A pure Go GGUF runtime** tuned for multi-core CPUs (no cgo, no GPU dependencies).
-- **Turn-key vector search**: quantized brute-force indexes, a pure-Go Annoy implementation, and an examples/search app that ties everything together.
-- A growing roadmap—HNSW is next—to cover larger recall-sensitive deployments.
+- **Turn-key vector search**: quantized brute-force indexes plus an experimental pure-Go Annoy implementation, and an examples/search app that ties everything together.
 
 If your corpus fits in RAM (think ≤ 10 K rows), you can embed, index, and search entirely in-process: one binary, one CPU, zero services.
 
 ## Installation
 
 ```bash
-go get github.com/lth/pure-go-llamas@v0.0.1
+go get github.com/headlands-org/go-semantica@v0.0.1
 ```
 
 Go 1.25 or newer is required. The command pulls in the library packages (`pkg/ggufembed`, `search/...`) and lets you vend the embedded model helper in your own modules.
@@ -20,60 +19,72 @@ Go 1.25 or newer is required. The command pulls in the library packages (`pkg/gg
 To install the CLI utilities (e.g., `gemma-embed`, `cmd/annoy`), run:
 
 ```bash
-go install github.com/lth/pure-go-llamas/cmd/gemma-embed@v0.0.1
+go install github.com/headlands-org/go-semantica/cmd/gemma-embed@v0.0.1
 ```
-
-## Project Layout
-- `pkg/ggufembed`: Public API for loading models and generating embeddings.
-- `model/`: Helper that embeds `embeddinggemma-300m-Q8_0.gguf` via `go:embed` for self-contained binaries.
-- `search/`: Shared search interfaces (`Builder`, `Index`, `Serializer`).
-- `search/annoy`: Pure-Go Annoy builder/index/serializer.
-- `search/brute`: Quantized brute-force index with int8/int16/fp32 storage and zero-copy loading.
-- `internal/gguf`: GGUF reader implementation that supports both mmap and in-memory data.
-- `internal/runtime`: Execution engine, kernels, and tokenizer integration.
-- `cmd/` and `examples/`: CLI utilities and sample programs (see `examples/search` for the end-to-end search demo).
-- `testdata/` and `scripts/`: Reference artifacts, comparison tools, and benchmark helpers.
 
 ## Getting Started
 ### Embedding in Go
 ```go
-import "github.com/lth/pure-go-llamas/pkg/ggufembed"
+package main
 
-rt, err := ggufembed.Open("model.gguf")
-if err != nil {
-    log.Fatal(err)
+import (
+    "context"
+    "fmt"
+    "math"
+
+    "github.com/headlands-org/go-semantica/pkg/ggufembed"
+)
+
+func cosine(a, b []float32) float64 {
+    var dot, na, nb float64
+    for i := range a {
+        dot += float64(a[i] * b[i])
+        na += float64(a[i] * a[i])
+        nb += float64(b[i] * b[i])
+    }
+    return dot / (math.Sqrt(na) * math.Sqrt(nb))
 }
-defer rt.Close()
 
-embedding, err := rt.EmbedSingleInput(ctx, ggufembed.EmbedInput{
-    Task:    ggufembed.TaskSearchQuery,
-    Content: "Hello, world!",
-    Dim:     ggufembed.DefaultEmbedDim, // 512 by default (supports 768/512/256/128)
-})
+func main() {
+    rt, err := ggufembed.Open("model.gguf")
+    if err != nil {
+        panic(err)
+    }
+    defer rt.Close()
 
-// Supported tasks (per the EmbeddingGemma model card):
-//   TaskSearchQuery        -> "task: search result | query: ..."
-//   TaskSearchDocument     -> "title: {title|\"none\"} | text: ..."
-//   TaskQuestionAnswering  -> "task: question answering | query: ..."
-//   TaskFactVerification   -> "task: fact checking | query: ..."
-//   TaskClassification     -> "task: classification | query: ..."
-//   TaskClustering         -> "task: clustering | query: ..."
-//   TaskSemanticSimilarity -> "task: sentence similarity | query: ..."
-//   TaskCodeRetrieval      -> "task: code retrieval | query: ..."
-//   TaskNone               -> leaves the content unchanged.
-//
-// Supported embedding dimensions (Matryoshka tiers): 768, 512, 256, 128.
-// Passing Dim=0 selects ggufembed.DefaultEmbedDim (512).
-if err != nil {
-    log.Fatal(err)
+    // Test sentences: two similar, one different.
+    sentences := []string{
+        "The cat sits on the mat",
+        "A feline rests on the rug",
+        "Quantum computers use superposition",
+    }
+
+    inputs := make([]ggufembed.EmbedInput, len(sentences))
+    for i, text := range sentences {
+        inputs[i] = ggufembed.EmbedInput{
+            Task:    ggufembed.TaskSemanticSimilarity,
+            Content: text,
+        }
+    }
+
+    ctx := context.Background()
+    embs, err := rt.EmbedInputs(ctx, inputs)
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Printf("cosine(cat vs feline)  = %.3f\n", cosine(embs[0], embs[1]))
+    fmt.Printf("cosine(cat vs quantum) = %.3f\n", cosine(embs[0], embs[2]))
 }
 ```
 
-To ship without external model files, use the embedded helper:
-```go
-import "github.com/lth/pure-go-llamas/model"
+To put the whole dang embedding model RIGHT in your binary, do this:
 
-rt, _ := model.Open() // loads the embedded Gemma weights straight from memory
+```go
+import "github.com/headlands-org/go-semantica/model"
+
+rt := model.MustOpen() // loads the embedded Gemma weights straight from your binary
+defer rt.Close()
 ```
 
 ### Search quick start
@@ -86,7 +97,7 @@ go run ./examples/search \
   -query "Save parking spot with location and notes"
 ```
 
-The example embeds the dataset (batching 128 at a time), builds both Annoy and brute-force indexes, writes them to disk (`icons.brute.<dim>.<quant>.idx`), and loads whichever files already exist. Each run prints index sizes, load/build timings, and the top-10 matches—with distance first so you can skim the results—and you can flip `-dim`/`-quant` to explore recall vs. footprint trade-offs.
+The example embeds the dataset (batching 128 at a time), builds both Annoy (experimental) and brute-force indexes, writes them to disk (`icons.brute.<dim>.<quant>.idx`), and loads whichever files already exist. Each run prints index sizes, load/build timings, and the top-10 matches—with distance first so you can skim the results—and you can flip `-dim`/`-quant` to explore recall vs. footprint trade-offs.
 
 ### Small-data deployment recipe
 
@@ -130,7 +141,7 @@ Benchmarks collected on Arch Linux with `embeddinggemma-300m-Q8_0.gguf`. The Go 
 
 | Runtime (threads) | Short 9 w | Cores | Long 49 w | Cores | Extra-long ~400 w | Cores |
 |-------------------|-----------|-------|-----------|-------|-------------------|-------|
-| pure-go-llamas    | 17.3 ms / 60.9 ms | 3.5× | 76.9 ms / 289.2 ms | 3.8× | 1243.6 ms / 3248.5 ms | 2.6× |
+| go-semantica    | 17.3 ms / 60.9 ms | 3.5× | 76.9 ms / 289.2 ms | 3.8× | 1243.6 ms / 3248.5 ms | 2.6× |
 | llama.cpp (4)     | 8.1 ms / 31.9 ms | 3.9× | 28.1 ms / 111.6 ms | 4.0× | 281.7 ms / 1123.0 ms | 4.0× |
 | llama.cpp (48)    | 38.5 ms / 323.5 ms | 8.4× | 55.0 ms / 526.1 ms | 9.6× | **243.0 ms / 3074.4 ms** | **12.6×** |
 
@@ -138,17 +149,24 @@ Benchmarks collected on Arch Linux with `embeddinggemma-300m-Q8_0.gguf`. The Go 
 
 | Runtime (threads) | Short docs emb/s | CPU / emb | Cores | Long docs emb/s | CPU / emb | Cores |
 |-------------------|------------------|-----------|-------|-----------------|-----------|-------|
-| pure-go-llamas    | 285.2            | 74.99 ms  | 21.6× | 47.1            | 469.44 ms | 22.5× |
+| go-semantica    | 285.2            | 74.99 ms  | 21.6× | 47.1            | 469.44 ms | 22.5× |
 | llama.cpp (4)     | 253.3            | 15.73 ms  | 4.0×  | 31.5            | 125.06 ms | 4.2× |
 | llama.cpp (48)    | 266.8            | 46.47 ms  | 12.9× | 42.8            | 354.16 ms | 15.3× |
 
 **Snapshot**
 
 - llama.cpp keeps four cores busy by default; with `-threads` it scales linearly, driving the ~400-token doc to 243 ms wall while consuming ~12–15 cores.  
-- pure-go-llamas still sheds parallelism on long sequences (~11 % utilisation), so closing the latency gap now means reducing per-token CPU rather than spawning more goroutines.  
+- go-semantica still sheds parallelism on long sequences (~11 % utilisation), so closing the latency gap now means reducing per-token CPU rather than spawning more goroutines.  
 - Our batch path already saturates most of the socket (>21 cores) but each embedding still costs ~5× more CPU than llama.cpp—kernel efficiency remains the bottleneck.  
 
 Idle footprint remains ~54 MB heap for pure Go vs. ~356 MB RSS for llama.cpp.
+
+## Repository layout
+- `pkg/ggufembed`: public embedding API and prompt helpers.
+- `model`: embedded Gemma weights (`MustOpen` for self-contained binaries).
+- `search`: shared search interfaces plus quantized brute force and experimental Annoy backends.
+- `examples`: runnable demos; `examples/search` ties embedding and search together.
+- `cmd`: CLI utilities and benchmarks built on the same packages.
 
 ## Status and Limitations
 - Only embedding models are supported; text generation is out of scope.

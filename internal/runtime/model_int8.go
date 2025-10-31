@@ -5,8 +5,8 @@ import (
 	"math"
 	goruntime "runtime"
 
-	"github.com/lth/pure-go-llamas/internal/gguf"
-	"github.com/lth/pure-go-llamas/internal/kernels"
+	"github.com/headlands-org/go-semantica/internal/gguf"
+	"github.com/headlands-org/go-semantica/internal/kernels"
 )
 
 // LayerINT8 holds raw Q8_0 weight data for INT8 inference (zero-copy)

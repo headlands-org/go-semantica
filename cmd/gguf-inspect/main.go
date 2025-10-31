@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/lth/pure-go-llamas/internal/gguf"
+	"github.com/headlands-org/go-semantica/internal/gguf"
 )
 
 func main() {

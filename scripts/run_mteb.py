@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate pure-go-llamas embeddings on MTEB (English, v2).
+"""Evaluate go-semantica embeddings on MTEB (English, v2).
 
 This script wraps the `cmd/gemma-embed` binary so we can plug the Go runtime
 into the Python MTEB benchmark without building new bindings. It streams texts
@@ -55,7 +55,7 @@ class PureGoEncoder:
 
     @property
     def name(self) -> str:
-        return "pure-go-llamas-embeddinggemma-300m"
+        return "go-semantica-embeddinggemma-300m"
 
     # MTEB calls encode/encode_queries/encode_corpus depending on the task.
     def encode(self, sentences: Sequence[str], **_: object) -> np.ndarray:

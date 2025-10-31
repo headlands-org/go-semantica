@@ -1,6 +1,6 @@
 # Parallelization Benchmark Results
 
-This document contains comprehensive benchmark results for all parallelized operations in pure-go-llamas, showing serial vs parallel performance, scaling characteristics, and optimal threshold recommendations.
+This document contains comprehensive benchmark results for all parallelized operations in go-semantica, showing serial vs parallel performance, scaling characteristics, and optimal threshold recommendations.
 
 ## Test Environment
 

@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/lth/pure-go-llamas/internal/gguf"
+	"github.com/headlands-org/go-semantica/internal/gguf"
 )
 
 // float32ToFloat16 converts float32 to float16 (IEEE 754 half-precision)

@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lth/pure-go-llamas/model"
-	"github.com/lth/pure-go-llamas/pkg/ggufembed"
-	"github.com/lth/pure-go-llamas/search"
-	annoyindex "github.com/lth/pure-go-llamas/search/annoy"
+	"github.com/headlands-org/go-semantica/model"
+	"github.com/headlands-org/go-semantica/pkg/ggufembed"
+	"github.com/headlands-org/go-semantica/search"
+	annoyindex "github.com/headlands-org/go-semantica/search/annoy"
 )
 
 const defaultIconsPath = "../one/go/hugeicons/icons.json"

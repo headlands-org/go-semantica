@@ -2,12 +2,9 @@
 //
 // Import this package to use the embedded model without external files:
 //
-//	import "github.com/lth/pure-go-llamas/model"
+//	import "github.com/headlands-org/go-semantica/model"
 //
-//	rt, err := model.Open()
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
+//	rt := model.MustOpen()
 //	defer rt.Close()
 //
 // The model file is embedded at compile time, making binaries self-contained
@@ -17,7 +14,7 @@ package model
 import (
 	_ "embed"
 
-	"github.com/lth/pure-go-llamas/pkg/ggufembed"
+	"github.com/headlands-org/go-semantica/pkg/ggufembed"
 )
 
 //go:embed embeddinggemma-300m-Q8_0.gguf
@@ -28,4 +25,13 @@ var embeddedModelBytes []byte
 // Options can be passed to configure the runtime (e.g., WithThreads, WithVerbose).
 func Open(opts ...ggufembed.Option) (ggufembed.Runtime, error) {
 	return ggufembed.OpenBytes(embeddedModelBytes, opts...)
+}
+
+// MustOpen is like Open but panics if the embedded model cannot be loaded.
+func MustOpen(opts ...ggufembed.Option) ggufembed.Runtime {
+	rt, err := Open(opts...)
+	if err != nil {
+		panic(err)
+	}
+	return rt
 }

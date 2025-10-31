@@ -195,9 +195,9 @@ func TestRunTasksThresholdBehavior(t *testing.T) {
 	}
 
 	tests := []struct {
-		name        string
-		taskCount   int
-		threshold   int
+		name              string
+		taskCount         int
+		threshold         int
 		shouldRunParallel bool
 	}{
 		{"Below threshold", 2, 4, false},

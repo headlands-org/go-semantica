@@ -8,7 +8,7 @@ import (
 	"math/rand"
 	"sync"
 
-	"github.com/lth/pure-go-llamas/search"
+	"github.com/headlands-org/go-semantica/search"
 )
 
 var errBuilderFinalised = errors.New("annoy: builder already built")

@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"sync"
 
-	modelrt "github.com/lth/pure-go-llamas/internal/runtime"
+	modelrt "github.com/headlands-org/go-semantica/internal/runtime"
 )
 
 // Runtime is the main interface for the embedding runtime

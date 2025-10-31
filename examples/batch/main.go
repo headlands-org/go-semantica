@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/lth/pure-go-llamas/pkg/ggufembed"
+	"github.com/headlands-org/go-semantica/pkg/ggufembed"
 )
 
 func main() {

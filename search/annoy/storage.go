@@ -7,7 +7,7 @@ import (
 	"io"
 	"unsafe"
 
-	"github.com/lth/pure-go-llamas/search"
+	"github.com/headlands-org/go-semantica/search"
 )
 
 var fileMagic = [4]byte{'A', 'N', 'N', 'G'}

@@ -35,9 +35,9 @@ func TestTokenizerBasic(t *testing.T) {
 	}
 
 	cfg := Config{
-		AddBOS:   false, // Disable for simpler testing
-		AddEOS:   false,
-		NFKC:     false,
+		AddBOS:    false, // Disable for simpler testing
+		AddEOS:    false,
+		NFKC:      false,
 		Lowercase: false,
 	}
 
@@ -48,8 +48,8 @@ func TestTokenizerBasic(t *testing.T) {
 
 	// Test encoding
 	tests := []struct {
-		input    string
-		minLen   int // minimum expected length
+		input  string
+		minLen int // minimum expected length
 	}{
 		{"hello world", 1}, // Should tokenize into something
 		{"the", 1},
@@ -90,7 +90,7 @@ func TestNormalizer(t *testing.T) {
 	}{
 		{"no-op", "hello", false, false, false},
 		{"lowercase", "Hello", true, false, true},
-		{"nfkc", "ﬁ", false, true, true}, // ligature fi -> f i
+		{"nfkc", "ﬁ", false, true, true},    // ligature fi -> f i
 		{"both", "Ｈｅｌｌｏ", true, true, true}, // fullwidth -> ascii + lowercase
 	}
 
@@ -171,9 +171,9 @@ func TestBytefallbackTokens(t *testing.T) {
 	}
 
 	cfg := Config{
-		AddBOS:   false,
-		AddEOS:   false,
-		NFKC:     false,
+		AddBOS:    false,
+		AddEOS:    false,
+		NFKC:      false,
 		Lowercase: false,
 	}
 
@@ -188,10 +188,10 @@ func TestBytefallbackTokens(t *testing.T) {
 		// When Go's rune conversion sees invalid UTF-8, it converts to U+FFFD (replacement char)
 		// which encodes to UTF-8 as 0xEF 0xBF 0xBD. These bytes then trigger byte fallback.
 		tests := []struct {
-			name         string
-			input        string
-			expectBytes  []byte // The actual bytes after UTF-8 replacement char conversion
-			description  string
+			name        string
+			input       string
+			expectBytes []byte // The actual bytes after UTF-8 replacement char conversion
+			description string
 		}{
 			{
 				"high_byte_0xFF",
@@ -539,9 +539,9 @@ func TestBytefallbackTokens(t *testing.T) {
 		// Test that decoding byte tokens reconstructs the original bytes
 		// Encode several byte token IDs directly and decode
 		testCases := []struct {
-			name      string
-			byteVal   byte
-			tokenID   int
+			name    string
+			byteVal byte
+			tokenID int
 		}{
 			{"null", 0x00, 238},
 			{"space", 0x20, 270},

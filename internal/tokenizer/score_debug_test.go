@@ -1,3 +1,4 @@
+//go:build integration
 // +build integration
 
 package tokenizer
@@ -5,7 +6,7 @@ package tokenizer
 import (
 	"testing"
 
-	"github.com/lth/pure-go-llamas/internal/gguf"
+	"github.com/headlands-org/go-semantica/internal/gguf"
 )
 
 func TestTokenScores(t *testing.T) {
@@ -25,9 +26,9 @@ func TestTokenScores(t *testing.T) {
 	}
 
 	// Check scores for various tokens
-	testCases := []struct{
+	testCases := []struct {
 		token string
-		id int
+		id    int
 	}{
 		{"▁", 236743},
 		{"H", 236814},

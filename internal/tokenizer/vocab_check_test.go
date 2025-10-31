@@ -1,3 +1,4 @@
+//go:build integration
 // +build integration
 
 package tokenizer
@@ -6,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lth/pure-go-llamas/internal/gguf"
+	"github.com/headlands-org/go-semantica/internal/gguf"
 )
 
 func TestVocabTokenStrings(t *testing.T) {

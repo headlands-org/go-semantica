@@ -23,7 +23,7 @@ The resulting binary is self-contained (~300MB) and includes the model file.
 ## How It Works
 
 ```go
-import "github.com/lth/pure-go-llamas/model"
+import "github.com/headlands-org/go-semantica/model"
 
 rt, err := model.Open()  // Uses embedded model
 defer rt.Close()

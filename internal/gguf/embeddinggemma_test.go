@@ -1,3 +1,4 @@
+//go:build integration
 // +build integration
 
 package gguf
@@ -131,16 +132,16 @@ func TestEmbeddingGemmaTensorNaming(t *testing.T) {
 
 	// Look for key tensors
 	patterns := map[string]int{
-		"token_embd":         0,
-		"attn_q":             0,
-		"attn_k":             0,
-		"attn_v":             0,
-		"attn_output":        0,
-		"ffn_up":             0,
-		"ffn_down":           0,
-		"ffn_gate":           0,
+		"token_embd":          0,
+		"attn_q":              0,
+		"attn_k":              0,
+		"attn_v":              0,
+		"attn_output":         0,
+		"ffn_up":              0,
+		"ffn_down":            0,
+		"ffn_gate":            0,
 		"post_attention_norm": 0,
-		"attn_norm":          0,
+		"attn_norm":           0,
 	}
 
 	for _, name := range tensorNames {

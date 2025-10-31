@@ -34,10 +34,11 @@ func MatMulGGML(dst, weight, input []float32, batch, inDim, outDim int) {
 // contention and thrashing when parallel workers execute simultaneously.
 //
 // Benchmark data (ns/op, Apple M1 Pro ARM64):
-//   Size          Block=16  Block=32  Block=64  Block=128
-//   128x128        7245      5861      5529      5724
-//   256x256x4     152108    107926     88128     85423
-//   512x2048x4   1882379   1504793   1405859   1384666
+//
+//	Size          Block=16  Block=32  Block=64  Block=128
+//	128x128        7245      5861      5529      5724
+//	256x256x4     152108    107926     88128     85423
+//	512x2048x4   1882379   1504793   1405859   1384666
 //
 // Note: Block 16 prioritizes cache efficiency for parallel execution over
 // single-threaded throughput. See cache_benchmark_test.go for full analysis.

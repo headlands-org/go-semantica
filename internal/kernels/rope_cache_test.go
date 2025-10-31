@@ -127,9 +127,9 @@ func TestApplyRoPECachedParallelThreshold(t *testing.T) {
 	cache := NewRoPECache(64, 10000.0, 2048)
 
 	tests := []struct {
-		name          string
-		seqLen        int
-		nHeads        int
+		name            string
+		seqLen          int
+		nHeads          int
 		shouldSerialize bool
 	}{
 		{"BelowThreshold_4x4", 4, 4, true},    // 16 < 64

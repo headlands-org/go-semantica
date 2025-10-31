@@ -70,7 +70,7 @@ func BenchmarkMatMulGGMLTiling(b *testing.B) {
 // BenchmarkMatMulF32Tiling measures standard matmul with different block sizes
 func BenchmarkMatMulF32Tiling(b *testing.B) {
 	configs := []struct {
-		name string
+		name    string
 		M, K, N int
 	}{
 		{"Square_128", 128, 128, 128},
@@ -169,7 +169,7 @@ func BenchmarkMatMulDimScaling(b *testing.B) {
 // BenchmarkMatMulINT8 measures INT8 quantized matmul performance
 func BenchmarkMatMulINT8(b *testing.B) {
 	configs := []struct {
-		name string
+		name    string
 		M, K, N int
 	}{
 		{"Small_128x128x128", 128, 128, 128},

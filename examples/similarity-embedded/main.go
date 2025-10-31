@@ -13,8 +13,8 @@ import (
 	"log"
 	"math"
 
-	"github.com/lth/pure-go-llamas/model"
-	"github.com/lth/pure-go-llamas/pkg/ggufembed"
+	"github.com/headlands-org/go-semantica/model"
+	"github.com/headlands-org/go-semantica/pkg/ggufembed"
 )
 
 func main() {

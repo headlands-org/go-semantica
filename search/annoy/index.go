@@ -9,7 +9,7 @@ import (
 	"os"
 	"sort"
 
-	"github.com/lth/pure-go-llamas/search"
+	"github.com/headlands-org/go-semantica/search"
 )
 
 // Index represents a read-only Annoy index.

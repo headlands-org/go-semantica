@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/lth/pure-go-llamas/search"
+	"github.com/headlands-org/go-semantica/search"
 )
 
 func TestBuilderSearchAndSerialize(t *testing.T) {

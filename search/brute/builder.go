@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/lth/pure-go-llamas/search"
+	"github.com/headlands-org/go-semantica/search"
 )
 
 var errBuilderFinalised = errors.New("brute: builder already built")

@@ -1,3 +1,4 @@
+//go:build integration
 // +build integration
 
 package kernels
@@ -6,7 +7,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/lth/pure-go-llamas/internal/gguf"
+	"github.com/headlands-org/go-semantica/internal/gguf"
 )
 
 const testModelPath = "../../models/All-MiniLM-L6-v2-Embedding-GGUF/all-MiniLM-L6-v2-Q8_0.gguf"
@@ -129,7 +130,7 @@ func TestNormalizationWithRealWeights(t *testing.T) {
 	for _, name := range reader.ListTensors() {
 		desc, _ := reader.GetTensor(name)
 		if desc.DType == gguf.DTypeF32 && len(desc.Shape) == 1 &&
-		   (containsString(name, "norm") || containsString(name, "ln")) {
+			(containsString(name, "norm") || containsString(name, "ln")) {
 			normTensor = name
 			break
 		}
@@ -160,7 +161,7 @@ func TestNormalizationWithRealWeights(t *testing.T) {
 	// Create test input
 	input := make([]float32, dim)
 	for i := range input {
-		input[i] = float32(i%100) * 0.01 - 0.5 // values in [-0.5, 0.49]
+		input[i] = float32(i%100)*0.01 - 0.5 // values in [-0.5, 0.49]
 	}
 
 	// Test RMSNorm

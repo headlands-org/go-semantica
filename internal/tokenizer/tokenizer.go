@@ -14,12 +14,12 @@ import (
 type TokenType int32
 
 const (
-	TokenNormal TokenType = 1
-	TokenUnknown TokenType = 2
-	TokenControl TokenType = 3
+	TokenNormal      TokenType = 1
+	TokenUnknown     TokenType = 2
+	TokenControl     TokenType = 3
 	TokenUserDefined TokenType = 4
-	TokenUnused TokenType = 5
-	TokenByte TokenType = 6
+	TokenUnused      TokenType = 5
+	TokenByte        TokenType = 6
 )
 
 // SpecialToken represents a special token (BOS, EOS, UNK, etc.)
@@ -30,26 +30,26 @@ type SpecialToken struct {
 
 // Tokenizer is a SentencePiece/Unigram tokenizer
 type Tokenizer struct {
-	vocab       []string
-	scores      []float32
-	tokenTypes  []TokenType
-	tokenToID   map[string]int
-	bosID       int
-	eosID       int
-	unkID       int
-	padID       int
-	addBOS      bool
-	addEOS      bool
-	normalizer  Normalizer
+	vocab      []string
+	scores     []float32
+	tokenTypes []TokenType
+	tokenToID  map[string]int
+	bosID      int
+	eosID      int
+	unkID      int
+	padID      int
+	addBOS     bool
+	addEOS     bool
+	normalizer Normalizer
 }
 
 // Config holds tokenizer configuration
 type Config struct {
-	AddBOS     bool
-	AddEOS     bool
-	Lowercase  bool
+	AddBOS        bool
+	AddEOS        bool
+	Lowercase     bool
 	RemoveAccents bool
-	NFKC       bool
+	NFKC          bool
 }
 
 // New creates a new tokenizer
@@ -221,9 +221,9 @@ func (t *Tokenizer) tokenizeBPE(text string) []string {
 
 	// Step 1: Split into UTF-8 characters as initial symbols
 	type symbol struct {
-		text  string
-		prev  int
-		next  int
+		text string
+		prev int
+		next int
 	}
 
 	runes := []rune(text)

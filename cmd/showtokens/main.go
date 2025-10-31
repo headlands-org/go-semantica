@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/lth/pure-go-llamas/internal/runtime"
+	"github.com/headlands-org/go-semantica/internal/runtime"
 )
 
 func main() {

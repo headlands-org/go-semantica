@@ -1,6 +1,6 @@
 # Examples
 
-This directory contains focused examples demonstrating the key use cases of the pure-go-llamas embedding library.
+This directory contains focused examples demonstrating the key use cases of the go-semantica embedding library.
 
 ## similarity - Semantic Similarity Comparison
 

@@ -4,7 +4,7 @@ Scripts for running and comparing embedding benchmarks.
 
 ## Quick Start
 
-### Run pure-go-llamas benchmark
+### Run go-semantica benchmark
 ```bash
 ./benchmark -model=model/embeddinggemma-300m-Q8_0.gguf -mode=comprehensive
 ```
@@ -17,7 +17,7 @@ Scripts for running and comparing embedding benchmarks.
 ## Installing llama.cpp
 
 ```bash
-# Clone llama.cpp (sibling to pure-go-llamas)
+# Clone llama.cpp (sibling to go-semantica)
 cd ..
 git clone https://github.com/ggerganov/llama.cpp
 cd llama.cpp
@@ -28,15 +28,15 @@ make -j
 # Verify
 ./embedding --help
 
-# Return to pure-go-llamas
-cd ../pure-go-llamas
+# Return to go-semantica
+cd ../go-semantica
 ```
 
 ## Running Comparisons
 
 ### 1. Run both benchmarks
 ```bash
-# Run pure-go-llamas (save output)
+# Run go-semantica (save output)
 ./benchmark -model=model/embeddinggemma-300m-Q8_0.gguf -mode=comprehensive > results_go.txt
 
 # Run llama.cpp (save output)
@@ -46,7 +46,7 @@ cd ../pure-go-llamas
 ### 2. Compare side-by-side
 ```bash
 # View both results
-echo "=== pure-go-llamas ===" && cat results_go.txt
+echo "=== go-semantica ===" && cat results_go.txt
 echo ""
 echo "=== llama.cpp ===" && cat results_llamacpp.txt
 ```
@@ -92,24 +92,24 @@ For now, the script only measures single-document latency (scenarios 1-3).
 - Excludes model loading (~160ms overhead per process)
 - Measures pure computation time for fair comparison
 
-**pure-go-llamas**: Measures inference time with model already loaded
+**go-semantica**: Measures inference time with model already loaded
 - Directly comparable to llama.cpp's prompt eval time
 
 ### Expected Differences
 
 **Memory:**
-- pure-go-llamas uses memory-mapped I/O (zero-copy)
+- go-semantica uses memory-mapped I/O (zero-copy)
 - llama.cpp loads model into memory
-- Expect pure-go-llamas to use 5-10× less memory
+- Expect go-semantica to use 5-10× less memory
 
 **Latency:**
 - llama.cpp is highly optimized C++ with extensive SIMD
 - Current results: llama.cpp 20-40× faster on single documents
-- pure-go-llamas prioritizes portability and simplicity
+- go-semantica prioritizes portability and simplicity
 
 **Throughput:**
 - Both saturate CPU effectively
-- pure-go-llamas uses coarse-grained parallelism (worker pools)
+- go-semantica uses coarse-grained parallelism (worker pools)
 - llama.cpp uses fine-grained parallelism within operations
 
 ### Fair Comparison Criteria

@@ -16,27 +16,27 @@ func BenchmarkRoPEParallelVsSerial(b *testing.B) {
 		headDim int
 	}{
 		// Below threshold (totalWork < 64)
-		{4, 8, 64},   // totalWork = 32
-		{8, 4, 64},   // totalWork = 32
-		{4, 12, 64},  // totalWork = 48
+		{4, 8, 64},  // totalWork = 32
+		{8, 4, 64},  // totalWork = 32
+		{4, 12, 64}, // totalWork = 48
 
 		// At threshold (totalWork = 64)
-		{8, 8, 64},   // totalWork = 64
-		{16, 4, 64},  // totalWork = 64
+		{8, 8, 64},  // totalWork = 64
+		{16, 4, 64}, // totalWork = 64
 
 		// Above threshold - small
-		{16, 8, 64},  // totalWork = 128
-		{32, 4, 64},  // totalWork = 128
-		{8, 16, 64},  // totalWork = 128
+		{16, 8, 64}, // totalWork = 128
+		{32, 4, 64}, // totalWork = 128
+		{8, 16, 64}, // totalWork = 128
 
 		// Medium workloads
-		{32, 16, 64},  // totalWork = 512
-		{64, 8, 64},   // totalWork = 512
-		{128, 8, 64},  // totalWork = 1024
+		{32, 16, 64}, // totalWork = 512
+		{64, 8, 64},  // totalWork = 512
+		{128, 8, 64}, // totalWork = 1024
 
 		// Large workloads
-		{256, 16, 64}, // totalWork = 4096
-		{512, 16, 64}, // totalWork = 8192
+		{256, 16, 64},  // totalWork = 4096
+		{512, 16, 64},  // totalWork = 8192
 		{256, 32, 128}, // totalWork = 8192, larger headDim
 	}
 
@@ -66,7 +66,7 @@ func BenchmarkRoPEParallelVsSerial(b *testing.B) {
 		for i := 0; i < cfg.seqLen; i++ {
 			pos[i] = i
 			for j := i * cfg.nHeads * cfg.headDim; j < (i+1)*cfg.nHeads*cfg.headDim; j++ {
-				qk[j] = float32(j % 100) * 0.01
+				qk[j] = float32(j%100) * 0.01
 			}
 		}
 

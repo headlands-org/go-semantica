@@ -12,10 +12,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/lth/pure-go-llamas/model"
-	"github.com/lth/pure-go-llamas/pkg/ggufembed"
-	"github.com/lth/pure-go-llamas/search"
-	brute "github.com/lth/pure-go-llamas/search/brute"
+	"github.com/headlands-org/go-semantica/model"
+	"github.com/headlands-org/go-semantica/pkg/ggufembed"
+	"github.com/headlands-org/go-semantica/search"
+	brute "github.com/headlands-org/go-semantica/search/brute"
 )
 
 const (

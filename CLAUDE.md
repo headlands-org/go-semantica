@@ -1,1 +1,1 @@
-Please refer to `AGENTS.md` for the full contributor guidelines.
+Agents use side door. See `AGENTS.md` please

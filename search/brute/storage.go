@@ -7,7 +7,7 @@ import (
 	"io"
 	"unsafe"
 
-	"github.com/lth/pure-go-llamas/search"
+	"github.com/headlands-org/go-semantica/search"
 )
 
 var bruteMagic = [4]byte{'B', 'R', 'U', 'T'}
