@@ -9,6 +9,8 @@ var (
 	hasNEON = cpu.ARM64.HasASIMD   // Advanced SIMD (NEON) - always available on ARM64
 	hasSDOT = cpu.ARM64.HasASIMDDP // Dot Product instructions (ARMv8.2+)
 	hasAVX2 = cpu.ARM64.HasASIMD   // Reuse flag to enable SIMD paths in shared code
+	// AVX512 VNNI is x86-specific; keep flag for shared test guards.
+	hasAVX512VNNI = false
 )
 
 // dotProductNEONAsm is the ARM NEON assembly implementation

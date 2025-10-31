@@ -8,6 +8,8 @@ import "unsafe"
 var (
 	hasAVX2   = false
 	hasAVX512 = false
+	// Maintain the shared SIMD feature surface for non-x86 builds.
+	hasAVX512VNNI = false
 )
 
 // dotProductSIMD falls back to scalar on non-AMD64 platforms
