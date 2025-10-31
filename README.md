@@ -1,3 +1,5 @@
+![Semantic Sleuth Gopher](semantic_sleuth_gopher.jpg)
+
 # go-semantica: Gemma Embedding & Search Stack
 
 `go-semantica` is a batteries-included, CPU-only embedding stack written in Go. It ships with:
