@@ -9,6 +9,20 @@
 
 If your corpus fits in RAM (think ≤ 10 K rows), you can embed, index, and search entirely in-process: one binary, one CPU, zero services.
 
+## Installation
+
+```bash
+go get github.com/lth/pure-go-llamas@v0.0.1
+```
+
+Go 1.25 or newer is required. The command pulls in the library packages (`pkg/ggufembed`, `search/...`) and lets you vend the embedded model helper in your own modules.
+
+To install the CLI utilities (e.g., `gemma-embed`, `cmd/annoy`), run:
+
+```bash
+go install github.com/lth/pure-go-llamas/cmd/gemma-embed@v0.0.1
+```
+
 ## Project Layout
 - `pkg/ggufembed`: Public API for loading models and generating embeddings.
 - `model/`: Helper that embeds `embeddinggemma-300m-Q8_0.gguf` via `go:embed` for self-contained binaries.
