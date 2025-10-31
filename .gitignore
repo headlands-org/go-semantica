@@ -1,0 +1,44 @@
+# Binaries
+*.test
+embeddinggemma-demo
+gemma-embed
+gguf-inspect
+simple
+test
+/benchmark
+/benchmark-baseline
+/similarity
+/similarity-embedded
+/batch
+examples/test-components/test-components
+*.idx
+
+# Profile files
+*.prof
+*.pprof
+
+# Model cache directories (models are now in Git LFS under model/)
+.cache/
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+
+# Generated evaluation artifacts
+icons.ann
+icons.vec.jsonl
+mteb_results/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# C++ benchmark build artifacts
+benchmark_cpp/build/
+benchmark_cpp/*.o
+benchmark_cpp/benchmark_cpp
+
+# Silly robots create a lot of .md, let's not let that stuff get committed quite so easily
+/*.md
