@@ -1,0 +1,12 @@
+# Reference embeddings from llama.cpp for EmbeddingGemma Q8_0
+# Command: llama-embedding -m embeddinggemma-300m-Q8_0.gguf -p "Hello world" --embd-normalize 2
+
+Text: "Hello world"
+Dimensions: 768
+First 20 values:
+0.045353  0.019009 -0.023062  0.048222 -0.015216 -0.064155 -0.010043  0.017571  0.030328  0.002995 -0.024283 -0.060874  0.007241  0.030302 -0.026810  0.016176  0.014976  0.004858  0.014418 -0.058049
+
+Performance (llama.cpp):
+- Load time: 202.51 ms
+- Encoding: 4.31 ms / 4 tokens (928.72 tokens/sec)
+- Total: 4.75 ms / 5 tokens
