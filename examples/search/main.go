@@ -218,6 +218,7 @@ func main() {
 		bruteIdx = loadedIface.(*bruteindex.Index)
 	}
 
+	queryEmbedStart := time.Now()
 	queryVec, err := rt.EmbedSingleInput(ctx, ggufembed.EmbedInput{
 		Task:    ggufembed.TaskSearchQuery,
 		Content: *queryText,
@@ -226,29 +227,23 @@ func main() {
 	if err != nil {
 		log.Fatalf("embed query: %v", err)
 	}
+	queryEmbedDur := time.Since(queryEmbedStart)
 
-	fmt.Printf("\nQuery: %q\n\n", *queryText)
+	fmt.Printf("\nQuery: %q\n", *queryText)
+	fmt.Printf("Query embed time: %s\n\n", formatDuration(queryEmbedDur))
 	runSearch("Annoy", annIdx, queryVec, icons)
 	runSearch("Brute", bruteIdx, queryVec, icons)
 }
 
 func runSearch(label string, idx search.Index, query []float32, icons []iconRecord) {
-	embedStart := time.Now()
-	vec := make([]float32, len(query))
-	copy(vec, query)
-	embedDur := time.Since(embedStart)
-
 	searchStart := time.Now()
-	results, err := idx.SearchVector(vec, 10)
+	results, err := idx.SearchVector(query, 10)
 	if err != nil {
 		log.Fatalf("%s search: %v", label, err)
 	}
 	searchDur := time.Since(searchStart)
 
-	fmt.Printf("%s results (embed=%s search=%s):\n",
-		label,
-		formatDuration(embedDur),
-		formatDuration(searchDur))
+	fmt.Printf("%s results (search=%s):\n", label, formatDuration(searchDur))
 	for i, res := range results {
 		id := int(res.ID)
 		if id < 0 || id >= len(icons) {
