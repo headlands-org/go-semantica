@@ -179,4 +179,5 @@ Idle footprint remains ~54 MB heap for pure Go vs. ~356 MB RSS for llama.cpp
 Use `AGENTS.md` for contribution guidelines. For search and edits during development, repository scripts assume `rg` and `apply_patch` workflows.
 
 ## License
-MIT
+- Code: MIT (see `LICENSE`).
+- Embedded model (`model/embeddinggemma-300m-Q8_0.gguf`): provided by Google under the [Gemma Terms of Use](https://ai.google.dev/gemma/terms); see the [EmbeddingGemma model card](https://ai.google.dev/gemma/docs/embeddinggemma/model_card) for intended usage guidance. Redistribution of the weights must include the Gemma attribution notice bundled at the end of `LICENSE`.
