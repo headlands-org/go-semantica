@@ -47,6 +47,7 @@ func cosine(a, b []float32) float64 {
 }
 
 func main() {
+    // Load the embedded Gemma model straight from your binary.
     rt := model.MustOpen()
     defer rt.Close()
 
@@ -69,14 +70,13 @@ func main() {
 }
 ```
 
-To put the whole dang embedding model RIGHT in your binary, do this:
+Example output:
 
-```go
-import "github.com/headlands-org/go-semantica/model"
-
-rt := model.MustOpen() // loads the embedded Gemma weights straight from your binary
-defer rt.Close()
 ```
+cosine(cat vs feline)  = 0.883
+cosine(cat vs quantum) = 0.602
+```
+The semantically similar pair (“cat” vs “feline”) scores much higher than the unrelated quantum sentence—exactly what we want from an embedding model.
 
 ### Search quick start
 
@@ -104,6 +104,8 @@ Annoy is available alongside brute force for larger corpora today; it’s still 
 ## Quantized brute-force trade-offs
 
 We benchmarked 500 random queries against the Hugeicons dataset (4 495 items). Each row compares a quantized brute index against the 768-dim fp32 baseline: the table lists on-disk size, average search latency, and recall@10 relative to the fp32 index.
+
+> **Note:** The “Hugeicons dataset” is a small corpus of AI-generated titles and descriptions of the icons in the fantastic [Hugeicons](https://hugeicons.com/) project.
 
 | Dim | Quant | Index Size | Avg Search (ms) | Recall vs 768 fp32 | Recall Loss |
 |-----|-------|------------|-----------------|--------------------|-------------|
