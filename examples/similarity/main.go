@@ -8,7 +8,7 @@ import (
 	"math"
 	"os"
 
-	"github.com/headlands-org/go-semantica/pkg/ggufembed"
+	"github.com/headlands-org/go-semantica"
 )
 
 func main() {
@@ -20,7 +20,7 @@ func main() {
 	modelPath := os.Args[1]
 
 	// Load the model
-	rt, err := ggufembed.Open(modelPath)
+	rt, err := semantica.Open(modelPath)
 	if err != nil {
 		log.Fatalf("Failed to open model: %v", err)
 	}
@@ -37,18 +37,12 @@ func main() {
 
 	// Generate embeddings for each sentence
 	ctx := context.Background()
-	embeddings := make([][]float32, len(sentences))
-
+	embeddings, err := rt.Embed(ctx, sentences, semantica.TaskSemanticSimilarity, semantica.DimensionsDefault)
+	if err != nil {
+		log.Fatalf("Failed to embed sentences: %v", err)
+	}
 	for i, sentence := range sentences {
-		embedding, err := rt.EmbedSingleInput(ctx, ggufembed.EmbedInput{
-			Task:    ggufembed.TaskSemanticSimilarity,
-			Content: sentence,
-		})
-		if err != nil {
-			log.Fatalf("Failed to embed sentence %d: %v", i, err)
-		}
-		embeddings[i] = embedding
-		fmt.Printf("Embedded: \"%s\"\n", sentence)
+		fmt.Printf("Embedded [%d]: \"%s\"\n", i+1, sentence)
 	}
 
 	fmt.Println()

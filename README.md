@@ -14,7 +14,7 @@ If your corpus fits in RAM (think ≤ 10 K rows), you can embed, index, and 
 go get github.com/headlands-org/go-semantica@v0.0.1
 ```
 
-Go 1.25 or newer is required. The command pulls in the library packages (`pkg/ggufembed`, `search/...`) and lets you vend the embedded model helper in your own modules.
+Go 1.25 or newer is required. The command pulls in the top-level embedding API and search packages (`search/...`) so you can embed text and build indexes without extra wiring.
 
 To install the CLI utilities (e.g., `gemma-embed`, `cmd/annoy`), run:
 
@@ -32,7 +32,8 @@ import (
     "fmt"
     "math"
 
-    "github.com/headlands-org/go-semantica/pkg/ggufembed"
+    "github.com/headlands-org/go-semantica"
+    "github.com/headlands-org/go-semantica/model"
 )
 
 func cosine(a, b []float32) float64 {
@@ -46,10 +47,7 @@ func cosine(a, b []float32) float64 {
 }
 
 func main() {
-    rt, err := ggufembed.Open("model.gguf")
-    if err != nil {
-        panic(err)
-    }
+    rt := model.MustOpen()
     defer rt.Close()
 
     // Test sentences: two similar, one different.
@@ -59,16 +57,9 @@ func main() {
         "Quantum computers use superposition",
     }
 
-    inputs := make([]ggufembed.EmbedInput, len(sentences))
-    for i, text := range sentences {
-        inputs[i] = ggufembed.EmbedInput{
-            Task:    ggufembed.TaskSemanticSimilarity,
-            Content: text,
-        }
-    }
-
     ctx := context.Background()
-    embs, err := rt.EmbedInputs(ctx, inputs)
+    // EmbeddingGemma supports different "tasks" and Matryoshka dimensions.
+    embs, err := rt.Embed(ctx, sentences, semantica.TaskSemanticSimilarity, semantica.Dimensions512)
     if err != nil {
         panic(err)
     }
@@ -106,9 +97,9 @@ For a few thousand documents (≈ 8 K icons in the demo):
 1. Run the example once during build or release packaging to precompute `*.idx` files for your preferred Matryoshka tier(s) and quantization.
 2. Embed the GGUF model (`model.Open`) **and** the brute-force index (`//go:embed`) into your application binary.
 3. At startup, call `search/brute.Serializer.Deserialize` on the embedded bytes; the runtime keeps the vectors in a flat slice for efficient mmap or in-memory use.
-4. Use `pkg/ggufembed` to embed user queries on demand and call `Index.SearchVector`—no external services, queues, or GPUs required.
+4. Use `go-semantica` to embed user queries on demand and call `Index.SearchVector`—no external services, queues, or GPUs required.
 
-Annoy is available alongside brute force for larger corpora today, and HNSW support is planned to cover higher-recall scenarios without sacrificing latency.
+Annoy is available alongside brute force for larger corpora today; it’s still experimental compared with the quantized brute-force path.
 
 ## Quantized brute-force trade-offs
 
@@ -162,7 +153,7 @@ Benchmarks collected on Arch Linux with `embeddinggemma-300m-Q8_0.gguf`. The Go 
 Idle footprint remains ~54 MB heap for pure Go vs. ~356 MB RSS for llama.cpp.
 
 ## Repository layout
-- `pkg/ggufembed`: public embedding API and prompt helpers.
+- `go-semantica` (root package): public embedding API and prompt helpers.
 - `model`: embedded Gemma weights (`MustOpen` for self-contained binaries).
 - `search`: shared search interfaces plus quantized brute force and experimental Annoy backends.
 - `examples`: runnable demos; `examples/search` ties embedding and search together.

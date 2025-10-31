@@ -14,7 +14,7 @@ package model
 import (
 	_ "embed"
 
-	"github.com/headlands-org/go-semantica/pkg/ggufembed"
+	"github.com/headlands-org/go-semantica"
 )
 
 //go:embed embeddinggemma-300m-Q8_0.gguf
@@ -23,12 +23,12 @@ var embeddedModelBytes []byte
 // Open loads the embedded model and returns a Runtime directly from memory.
 //
 // Options can be passed to configure the runtime (e.g., WithThreads, WithVerbose).
-func Open(opts ...ggufembed.Option) (ggufembed.Runtime, error) {
-	return ggufembed.OpenBytes(embeddedModelBytes, opts...)
+func Open(opts ...semantica.Option) (*semantica.Runtime, error) {
+	return semantica.OpenBytes(embeddedModelBytes, opts...)
 }
 
 // MustOpen is like Open but panics if the embedded model cannot be loaded.
-func MustOpen(opts ...ggufembed.Option) ggufembed.Runtime {
+func MustOpen(opts ...semantica.Option) *semantica.Runtime {
 	rt, err := Open(opts...)
 	if err != nil {
 		panic(err)

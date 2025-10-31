@@ -13,8 +13,8 @@ import (
 	"log"
 	"math"
 
+	"github.com/headlands-org/go-semantica"
 	"github.com/headlands-org/go-semantica/model"
-	"github.com/headlands-org/go-semantica/pkg/ggufembed"
 )
 
 func main() {
@@ -36,18 +36,12 @@ func main() {
 
 	// Generate embeddings for each sentence
 	ctx := context.Background()
-	embeddings := make([][]float32, len(sentences))
-
+	embeddings, err := rt.Embed(ctx, sentences, semantica.TaskSemanticSimilarity, semantica.DimensionsDefault)
+	if err != nil {
+		log.Fatalf("Failed to embed sentences: %v", err)
+	}
 	for i, sentence := range sentences {
-		embedding, err := rt.EmbedSingleInput(ctx, ggufembed.EmbedInput{
-			Task:    ggufembed.TaskSemanticSimilarity,
-			Content: sentence,
-		})
-		if err != nil {
-			log.Fatalf("Failed to embed sentence %d: %v", i, err)
-		}
-		embeddings[i] = embedding
-		fmt.Printf("Embedded: \"%s\"\n", sentence)
+		fmt.Printf("Embedded [%d]: \"%s\"\n", i+1, sentence)
 	}
 
 	fmt.Println()

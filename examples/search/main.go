@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/headlands-org/go-semantica"
 	"github.com/headlands-org/go-semantica/model"
-	"github.com/headlands-org/go-semantica/pkg/ggufembed"
 	"github.com/headlands-org/go-semantica/search"
 	annoyindex "github.com/headlands-org/go-semantica/search/annoy"
 	bruteindex "github.com/headlands-org/go-semantica/search/brute"
@@ -100,10 +100,10 @@ func main() {
 				end = len(icons)
 			}
 			batch := icons[start:end]
-			inputs := make([]ggufembed.EmbedInput, len(batch))
+			inputs := make([]semantica.Input, len(batch))
 			for i, icon := range batch {
-				inputs[i] = ggufembed.EmbedInput{
-					Task:    ggufembed.TaskSearchDocument,
+				inputs[i] = semantica.Input{
+					Task:    semantica.TaskSearchDocument,
 					Title:   icon.Title,
 					Content: icon.Description,
 					Dim:     *dim,
@@ -219,8 +219,8 @@ func main() {
 	}
 
 	queryEmbedStart := time.Now()
-	queryVec, err := rt.EmbedSingleInput(ctx, ggufembed.EmbedInput{
-		Task:    ggufembed.TaskSearchQuery,
+	queryVec, err := rt.EmbedSingleInput(ctx, semantica.Input{
+		Task:    semantica.TaskSearchQuery,
 		Content: *queryText,
 		Dim:     *dim,
 	})

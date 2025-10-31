@@ -40,6 +40,6 @@ The `model` package:
 |---------|------------|---------------------|
 | Binary size | Small (~2MB) | Large (~300MB) |
 | Requires external model | Yes | No |
-| Import | `pkg/ggufembed` | `model` |
-| Open call | `ggufembed.Open(path)` | `model.Open()` |
+| Import | `go-semantica` | `model` |
+| Open call | `go-semantica.Open(path)` | `model.MustOpen()` |
 | Use case | Development, flexible | Distribution, deployment |

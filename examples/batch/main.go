@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/headlands-org/go-semantica/pkg/ggufembed"
+	"github.com/headlands-org/go-semantica"
 )
 
 func main() {
@@ -21,7 +21,7 @@ func main() {
 	modelPath := os.Args[1]
 
 	// Load the model
-	rt, err := ggufembed.Open(modelPath)
+	rt, err := semantica.Open(modelPath)
 	if err != nil {
 		log.Fatalf("Failed to open model: %v", err)
 	}
@@ -46,10 +46,10 @@ func main() {
 	fmt.Printf("Processing %d texts in batch...\n", len(texts))
 
 	// Generate embeddings in batch using document-optimised prompts.
-	inputs := make([]ggufembed.EmbedInput, len(texts))
+	inputs := make([]semantica.Input, len(texts))
 	for i, text := range texts {
-		inputs[i] = ggufembed.EmbedInput{
-			Task:    ggufembed.TaskSearchDocument,
+		inputs[i] = semantica.Input{
+			Task:    semantica.TaskSearchDocument,
 			Title:   "none",
 			Content: text,
 		}

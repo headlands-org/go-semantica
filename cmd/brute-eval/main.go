@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/headlands-org/go-semantica"
 	"github.com/headlands-org/go-semantica/model"
-	"github.com/headlands-org/go-semantica/pkg/ggufembed"
 	"github.com/headlands-org/go-semantica/search"
 	brute "github.com/headlands-org/go-semantica/search/brute"
 )
@@ -170,10 +170,10 @@ func embedIcons(icons []iconRecord) ([][]float32, error) {
 			end = len(icons)
 		}
 		batch := icons[start:end]
-		inputs := make([]ggufembed.EmbedInput, len(batch))
+		inputs := make([]semantica.Input, len(batch))
 		for i, icon := range batch {
-			inputs[i] = ggufembed.EmbedInput{
-				Task:    ggufembed.TaskSearchDocument,
+			inputs[i] = semantica.Input{
+				Task:    semantica.TaskSearchDocument,
 				Title:   icon.Title,
 				Content: icon.Description,
 				Dim:     dim,

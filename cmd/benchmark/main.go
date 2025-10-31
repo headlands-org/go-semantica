@@ -17,7 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/headlands-org/go-semantica/pkg/ggufembed"
+	"github.com/headlands-org/go-semantica"
 )
 
 var (
@@ -32,7 +32,7 @@ var (
 	cpuProfile   = flag.String("cpuprofile", "", "Write CPU profile to file")
 	blockProfile = flag.String("blockprofile", "", "Write blocking profile to file")
 	mutexProfile = flag.String("mutexprofile", "", "Write mutex contention profile to file")
-	embedDim     = flag.Int("dim", ggufembed.DefaultEmbedDim, "Embedding dimension (768, 512, 256, 128)")
+	embedDim     = flag.Int("dim", semantica.DefaultEmbedDim, "Embedding dimension (768, 512, 256, 128)")
 )
 
 // Test documents for the 5-scenario benchmark matrix
@@ -118,7 +118,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if _, err := ggufembed.ResolveDim(*embedDim); err != nil {
+	if _, err := semantica.ResolveDim(*embedDim); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n\n", err)
 		flag.Usage()
 		os.Exit(1)
@@ -143,7 +143,7 @@ func main() {
 	// Load model for batch/isolated modes
 	log.Printf("Loading model from %s...", *modelPath)
 	startLoad := time.Now()
-	rt, err := ggufembed.Open(*modelPath)
+	rt, err := semantica.Open(*modelPath)
 	if err != nil {
 		log.Fatalf("Failed to open model: %v", err)
 	}
@@ -290,7 +290,7 @@ func writeProfile(filename, profileName string) error {
 
 // runBatchMode runs the batch benchmark mode
 // Returns (total embeddings generated, actual wall duration, total CPU compute time)
-func runBatchMode(rt ggufembed.Runtime) (int, time.Duration, time.Duration) {
+func runBatchMode(rt *semantica.Runtime) (int, time.Duration, time.Duration) {
 	startTime := time.Now()
 	cpuStart := cpuTimeNow()
 	deadline := startTime.Add(time.Duration(*duration) * time.Second)
@@ -315,10 +315,10 @@ func runBatchMode(rt ggufembed.Runtime) (int, time.Duration, time.Duration) {
 		default:
 		}
 
-		inputs := make([]ggufembed.EmbedInput, *batchSize)
+		inputs := make([]semantica.Input, *batchSize)
 		for i := 0; i < *batchSize; i++ {
-			inputs[i] = ggufembed.EmbedInput{
-				Task:    ggufembed.TaskNone,
+			inputs[i] = semantica.Input{
+				Task:    semantica.TaskNone,
 				Content: testTexts[rand.Intn(len(testTexts))],
 				Dim:     *embedDim,
 			}
@@ -345,7 +345,7 @@ type workerResult struct {
 
 // runIsolatedMode runs the isolated benchmark mode
 // Returns (total embeddings generated, actual duration, compute time, per-worker counts)
-func runIsolatedMode(rt ggufembed.Runtime) (int, time.Duration, time.Duration, []int) {
+func runIsolatedMode(rt *semantica.Runtime) (int, time.Duration, time.Duration, []int) {
 	// Note: rt parameter is unused in isolated mode - each worker loads its own model
 	_ = rt
 
@@ -391,7 +391,7 @@ func worker(ctx context.Context, workerID int, wg *sync.WaitGroup, results chan<
 	defer wg.Done()
 
 	// Each worker loads its own independent model instance
-	rt, err := ggufembed.Open(*modelPath)
+	rt, err := semantica.Open(*modelPath)
 	if err != nil {
 		log.Printf("Worker %d: failed to open model: %v", workerID, err)
 		results <- workerResult{workerID: workerID, count: 0}
@@ -421,8 +421,8 @@ func worker(ctx context.Context, workerID int, wg *sync.WaitGroup, results chan<
 		text := testTexts[rand.Intn(len(testTexts))]
 
 		// Generate single embedding without modifying the content.
-		_, err := rt.EmbedSingleInput(ctx, ggufembed.EmbedInput{
-			Task:    ggufembed.TaskNone,
+		_, err := rt.EmbedSingleInput(ctx, semantica.Input{
+			Task:    semantica.TaskNone,
 			Content: text,
 			Dim:     *embedDim,
 		})
@@ -527,7 +527,7 @@ type ThroughputStats struct {
 }
 
 // measureIdleMemory measures memory after model load with GC
-func measureIdleMemory(rt ggufembed.Runtime) uint64 {
+func measureIdleMemory(rt *semantica.Runtime) uint64 {
 	// Force GC
 	runtime.GC()
 
@@ -541,16 +541,16 @@ func measureIdleMemory(rt ggufembed.Runtime) uint64 {
 	return m.HeapAlloc
 }
 
-func documentInput(content string) ggufembed.EmbedInput {
-	return ggufembed.EmbedInput{
-		Task:    ggufembed.TaskNone,
+func documentInput(content string) semantica.Input {
+	return semantica.Input{
+		Task:    semantica.TaskNone,
 		Content: content,
 		Dim:     *embedDim,
 	}
 }
 
 // warmup runs warmup embeddings to warm up caches
-func warmup(rt ggufembed.Runtime, doc string) {
+func warmup(rt *semantica.Runtime, doc string) {
 	ctx := context.Background()
 	for i := 0; i < 5; i++ {
 		_, _ = rt.EmbedSingleInput(ctx, documentInput(doc))
@@ -593,7 +593,7 @@ func calculateStats(values []float64) (mean, p50, p95, p99 float64) {
 }
 
 // measureSingleDocLatency measures single document latency with percentiles
-func measureSingleDocLatency(rt ggufembed.Runtime, doc string) LatencyStats {
+func measureSingleDocLatency(rt *semantica.Runtime, doc string) LatencyStats {
 	ctx := context.Background()
 	const numRuns = 20
 
@@ -638,7 +638,7 @@ func measureSingleDocLatency(rt ggufembed.Runtime, doc string) LatencyStats {
 
 // measureThroughput runs throughput test with memory sampling
 // docs can be a slice of varied documents (for short doc test) or a single document repeated (for long doc test)
-func measureThroughput(rt ggufembed.Runtime, docs []string, batchSizeOverride int, durationSec int) ThroughputStats {
+func measureThroughput(rt *semantica.Runtime, docs []string, batchSizeOverride int, durationSec int) ThroughputStats {
 	ctx := context.Background()
 
 	// Track peak memory in background goroutine
@@ -671,7 +671,7 @@ func measureThroughput(rt ggufembed.Runtime, docs []string, batchSizeOverride in
 
 	for time.Now().Before(deadline) {
 		// Select batch-size random texts from docs and build document prompts.
-		inputs := make([]ggufembed.EmbedInput, batchSizeOverride)
+		inputs := make([]semantica.Input, batchSizeOverride)
 		for i := 0; i < batchSizeOverride; i++ {
 			inputs[i] = documentInput(docs[rand.Intn(len(docs))])
 		}
@@ -786,7 +786,7 @@ func runComprehensiveMode() {
 
 	// 2. Load model and measure idle memory
 	log.Printf("[2/7] Loading model and measuring idle memory...")
-	rt, err := ggufembed.Open(*modelPath)
+	rt, err := semantica.Open(*modelPath)
 	if err != nil {
 		log.Fatalf("Failed to open model: %v", err)
 	}
@@ -843,7 +843,7 @@ func runSingleMode() {
 	// 1. Load model
 	log.Printf("[1/4] Loading model from %s...", *modelPath)
 	startLoad := time.Now()
-	rt, err := ggufembed.Open(*modelPath)
+	rt, err := semantica.Open(*modelPath)
 	if err != nil {
 		log.Fatalf("Failed to open model: %v", err)
 	}
@@ -879,7 +879,7 @@ func runSingleMode() {
 }
 
 // measureSingleDocLatencyPrecise measures single document latency with microsecond precision
-func measureSingleDocLatencyPrecise(rt ggufembed.Runtime, doc string, numRuns int) LatencyStats {
+func measureSingleDocLatencyPrecise(rt *semantica.Runtime, doc string, numRuns int) LatencyStats {
 	ctx := context.Background()
 
 	latencies := make([]float64, numRuns)

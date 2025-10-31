@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 - Core runtime lives under `internal/`, with GGUF parsing in `internal/gguf` and execution logic in `internal/runtime`.
-- Public APIs surface through `pkg/ggufembed`, while the embedded model helper resides in `model/`.
+- Public APIs surface through the root `go-semantica` package, while the embedded model helper resides in `model/`.
 - CLI tooling and samples sit in `cmd/` and `examples/`; shared test data is under `testdata/`.
 - Scripts and benchmarking assets are available in `scripts/` and `benchmark_cpp/` for profiling comparisons.
 
@@ -28,5 +28,5 @@
 - Provide reproduction steps or sample commands for behavioral changes and attach benchmark snippets when tuning kernels or runtime paths.
 
 ## Agent Workflow Notes
-- Use `ggufembed.OpenBytes` when testing embedded model flows—no temporary files should be introduced in new code.
+- Use `go-semantica.OpenBytes` when testing embedded model flows—no temporary files should be introduced in new code.
 - Prefer `rg` for searches and `apply_patch` for edits to keep diffs focused and automation-friendly.
