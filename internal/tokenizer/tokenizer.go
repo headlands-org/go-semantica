@@ -41,6 +41,11 @@ type Tokenizer struct {
 	addBOS     bool
 	addEOS     bool
 	normalizer Normalizer
+
+	// validBigramStarts is a precomputed set of valid (lastByte, firstByte) pairs
+	// for fast bigram filtering. Only bigrams whose byte boundary matches a known
+	// vocab token boundary can possibly exist in the vocabulary.
+	validBigramStarts map[uint16]struct{}
 }
 
 // Config holds tokenizer configuration
@@ -71,22 +76,41 @@ func New(vocab []string, scores []float32, tokenTypes []TokenType, cfg Config) (
 	}
 
 	t := &Tokenizer{
-		vocab:      vocab,
-		scores:     scores,
-		tokenTypes: tokenTypes,
-		tokenToID:  make(map[string]int),
-		bosID:      -1,
-		eosID:      -1,
-		unkID:      -1,
-		padID:      -1,
-		addBOS:     cfg.AddBOS,
-		addEOS:     cfg.AddEOS,
-		normalizer: NewNormalizer(cfg.Lowercase, cfg.RemoveAccents, cfg.NFKC),
+		vocab:             vocab,
+		scores:            scores,
+		tokenTypes:        tokenTypes,
+		tokenToID:         make(map[string]int),
+		bosID:             -1,
+		eosID:             -1,
+		unkID:             -1,
+		padID:             -1,
+		addBOS:            cfg.AddBOS,
+		addEOS:            cfg.AddEOS,
+		normalizer:        NewNormalizer(cfg.Lowercase, cfg.RemoveAccents, cfg.NFKC),
+		validBigramStarts: make(map[uint16]struct{}),
 	}
 
 	// Build reverse map
 	for i, token := range vocab {
 		t.tokenToID[token] = i
+	}
+
+	// Precompute valid bigram byte-pair boundaries for fast filtering.
+	// Collect all unique first and last bytes from vocab tokens.
+	firstBytes := make(map[byte]struct{})
+	lastBytes := make(map[byte]struct{})
+	for _, token := range vocab {
+		if len(token) > 0 {
+			firstBytes[token[0]] = struct{}{}
+			lastBytes[token[len(token)-1]] = struct{}{}
+		}
+	}
+	// Create all valid (lastByte, firstByte) combinations
+	for last := range lastBytes {
+		for first := range firstBytes {
+			key := uint16(last)<<8 | uint16(first)
+			t.validBigramStarts[key] = struct{}{}
+		}
 	}
 
 	// Note: Special token IDs should be set from metadata, not by string matching
@@ -212,14 +236,22 @@ func (t *Tokenizer) preprocessSpaces(text string) string {
 	return result.String()
 }
 
-// tokenizeBPE performs Byte Pair Encoding tokenization
-// Based on llama.cpp's SPM tokenizer implementation
+// tokenizeBPE performs Byte Pair Encoding tokenization using a priority queue.
+// This achieves O(n log n) complexity instead of the naive O(n²) approach.
+//
+// Algorithm:
+// 1. Initialize symbols as doubly-linked chain of characters
+// 2. Seed priority queue with all valid adjacent bigrams
+// 3. Pop best bigram, validate it's still valid (stale entry detection)
+// 4. Merge symbols and add new neighbor bigrams to queue
+// 5. Repeat until queue is empty
+// 6. Handle unknown tokens via byte fallback
 func (t *Tokenizer) tokenizeBPE(text string) []string {
 	if text == "" {
 		return nil
 	}
 
-	// Step 1: Split into UTF-8 characters as initial symbols
+	// Step 1: Split into UTF-8 characters as initial symbols (doubly-linked list)
 	type symbol struct {
 		text string
 		prev int
@@ -240,72 +272,100 @@ func (t *Tokenizer) tokenizeBPE(text string) []string {
 		symbols[len(symbols)-1].next = -1
 	}
 
-	// Step 2: Build priority queue of bigrams
-	type bigram struct {
-		left  int
-		right int
-		score float32
-		text  string
-	}
+	// Reusable buffer for building merged text
+	var mergeBuffer strings.Builder
+	mergeBuffer.Grow(64)
 
-	// Helper to try adding a bigram to candidates
-	tryAddBigram := func(left, right int, candidates *[]bigram) {
-		if left == -1 || right == -1 {
-			return
+	// Helper to try adding a bigram to the priority queue
+	tryAddBigram := func(left, right int, pq *bpePriorityQueue) bool {
+		if left < 0 || right < 0 || right >= len(symbols) {
+			return false
+		}
+		leftText := symbols[left].text
+		rightText := symbols[right].text
+		if leftText == "" || rightText == "" {
+			return false
 		}
 
-		text := symbols[left].text + symbols[right].text
-		if id, ok := t.tokenToID[text]; ok {
-			// This bigram exists in vocab, add to candidates
-			*candidates = append(*candidates, bigram{
+		// Fast filter: check if this byte boundary can exist in vocab
+		leftBytes := []byte(leftText)
+		rightBytes := []byte(rightText)
+		if len(leftBytes) > 0 && len(rightBytes) > 0 {
+			key := uint16(leftBytes[len(leftBytes)-1])<<8 | uint16(rightBytes[0])
+			if _, ok := t.validBigramStarts[key]; !ok {
+				return false
+			}
+		}
+
+		// Build merged text
+		mergeBuffer.Reset()
+		mergeBuffer.WriteString(leftText)
+		mergeBuffer.WriteString(rightText)
+		merged := mergeBuffer.String()
+
+		// Check if bigram exists in vocab
+		if id, ok := t.tokenToID[merged]; ok {
+			pq.push(&bpeBigram{
+				score: t.scores[id],
 				left:  left,
 				right: right,
-				score: t.scores[id],
-				text:  text,
+				text:  merged,
 			})
+			return true
+		}
+		return false
+	}
+
+	// Step 2: Initialize priority queue with all valid adjacent bigrams
+	pq := newBPEPriorityQueue(len(symbols))
+	for i := 0; i < len(symbols); i++ {
+		if symbols[i].next >= 0 {
+			tryAddBigram(i, symbols[i].next, pq)
 		}
 	}
 
-	// Step 3: Iteratively merge highest-scoring bigrams
-	for {
-		// Find all valid bigrams
-		var candidates []bigram
-		for i := 0; i < len(symbols); i++ {
-			if symbols[i].text != "" && symbols[i].next != -1 {
-				tryAddBigram(i, symbols[i].next, &candidates)
-			}
+	// Step 3: Main merge loop - pop best bigram, validate, merge, add neighbors
+	for pq.Len() > 0 {
+		bigram := pq.pop()
+
+		leftIdx := bigram.left
+		rightIdx := bigram.right
+
+		// Validation 1: Check if symbols still exist (not merged away)
+		if symbols[leftIdx].text == "" || symbols[rightIdx].text == "" {
+			continue // Stale entry
 		}
 
-		if len(candidates) == 0 {
-			break // No more merges possible
+		// Validation 2: Check if left.next still points to right
+		if symbols[leftIdx].next != rightIdx {
+			continue // Stale entry - symbols are no longer adjacent
 		}
 
-		// Find highest-scoring bigram (least negative = best)
-		// When scores are equal, use rightmost position (matches llama.cpp behavior)
-		bestIdx := 0
-		bestScore := candidates[0].score
-		for i := 1; i < len(candidates); i++ {
-			if candidates[i].score > bestScore ||
-				(candidates[i].score == bestScore && candidates[i].left > candidates[bestIdx].left) {
-				bestScore = candidates[i].score
-				bestIdx = i
-			}
+		// Validation 3: Verify merged text matches expected
+		mergeBuffer.Reset()
+		mergeBuffer.WriteString(symbols[leftIdx].text)
+		mergeBuffer.WriteString(symbols[rightIdx].text)
+		if mergeBuffer.String() != bigram.text {
+			continue // Stale entry - symbols changed since bigram was created
 		}
 
-		// Merge the best bigram
-		best := candidates[bestIdx]
-		left := best.left
-		right := best.right
-
-		// Merge right into left
-		symbols[left].text = best.text
-		symbols[left].next = symbols[right].next
-		if symbols[right].next != -1 {
-			symbols[symbols[right].next].prev = left
+		// Valid merge - perform it
+		symbols[leftIdx].text = bigram.text
+		symbols[leftIdx].next = symbols[rightIdx].next
+		if symbols[rightIdx].next >= 0 {
+			symbols[symbols[rightIdx].next].prev = leftIdx
 		}
+		symbols[rightIdx].text = "" // Mark as deleted
 
-		// Remove right symbol
-		symbols[right].text = ""
+		// Add new bigrams formed by this merge
+		// Left neighbor: (prev, merged)
+		if symbols[leftIdx].prev >= 0 {
+			tryAddBigram(symbols[leftIdx].prev, leftIdx, pq)
+		}
+		// Right neighbor: (merged, next)
+		if symbols[leftIdx].next >= 0 {
+			tryAddBigram(leftIdx, symbols[leftIdx].next, pq)
+		}
 	}
 
 	// Step 4: Collect remaining symbols
@@ -316,7 +376,7 @@ func (t *Tokenizer) tokenizeBPE(text string) []string {
 		}
 	}
 
-	// Step 5: Resegment any remaining unknown tokens
+	// Step 5: Handle unknown tokens via byte fallback
 	var final []string
 	for _, token := range result {
 		if _, ok := t.tokenToID[token]; ok {
