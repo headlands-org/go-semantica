@@ -45,12 +45,15 @@ var (
 	WithVerbose   = ggufembed.WithVerbose
 )
 
-// Input is a task-aware embedding request.
-type Input = ggufembed.EmbedInput
-
 // Runtime wraps the underlying embedding runtime and exposes a simplified API.
 type Runtime struct {
 	inner ggufembed.Runtime
+}
+
+// Document represents a titled document optimized for TaskSearchDocument prompts.
+type Document struct {
+	Title   string
+	Content string
 }
 
 // Open loads a GGUF model from disk and returns a Runtime.
@@ -106,11 +109,6 @@ func (r *Runtime) Embed(ctx context.Context, texts []string, task Task, dim Dime
 	return r.inner.EmbedInputs(ctx, inputs)
 }
 
-// EmbedInputs embeds task-aware inputs (advanced usage).
-func (r *Runtime) EmbedInputs(ctx context.Context, inputs []Input) ([][]float32, error) {
-	return r.inner.EmbedInputs(ctx, inputs)
-}
-
 // EmbedSingle embeds a single text using the provided task and dimensionality.
 func (r *Runtime) EmbedSingle(ctx context.Context, text string, task Task, dim Dimensions) ([]float32, error) {
 	results, err := r.Embed(ctx, []string{text}, task, dim)
@@ -123,14 +121,48 @@ func (r *Runtime) EmbedSingle(ctx context.Context, text string, task Task, dim D
 	return results[0], nil
 }
 
-// EmbedSingleInput embeds a single task-aware input (advanced usage).
-func (r *Runtime) EmbedSingleInput(ctx context.Context, input Input) ([]float32, error) {
-	return r.inner.EmbedSingleInput(ctx, input)
+// EmbedDocuments embeds a batch of titled documents using TaskSearchDocument prompts.
+func (r *Runtime) EmbedDocuments(ctx context.Context, docs []Document, dim Dimensions) ([][]float32, error) {
+	if len(docs) == 0 {
+		return nil, nil
+	}
+	resolvedDim, err := resolveDimensions(dim)
+	if err != nil {
+		return nil, err
+	}
+	inputs := make([]ggufembed.EmbedInput, len(docs))
+	for i, doc := range docs {
+		inputs[i] = ggufembed.EmbedInput{
+			Task:    ggufembed.TaskSearchDocument,
+			Title:   doc.Title,
+			Content: doc.Content,
+			Dim:     resolvedDim,
+		}
+	}
+	return r.inner.EmbedInputs(ctx, inputs)
+}
+
+// EmbedDocument embeds a single titled document using TaskSearchDocument prompts.
+func (r *Runtime) EmbedDocument(ctx context.Context, doc Document, dim Dimensions) ([]float32, error) {
+	results, err := r.EmbedDocuments(ctx, []Document{doc}, dim)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, fmt.Errorf("embed document: runtime returned no embeddings")
+	}
+	return results[0], nil
 }
 
 // Inner exposes the underlying runtime for advanced integrations.
 func (r *Runtime) Inner() ggufembed.Runtime {
 	return r.inner
+}
+
+// Tokenizer returns the tokenizer used by this runtime.
+func (r *Runtime) Tokenizer() *Tokenizer {
+	tok := r.inner.Tokenizer()
+	return &Tokenizer{inner: tok}
 }
 
 // ResolveDim re-exports the lower-level dimension resolver for compatibility.

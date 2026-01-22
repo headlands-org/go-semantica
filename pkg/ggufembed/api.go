@@ -33,6 +33,9 @@ type Runtime interface {
 
 	// MaxSeqLen returns the maximum sequence length
 	MaxSeqLen() int
+
+	// Tokenizer returns the underlying tokenizer
+	Tokenizer() Tokenizer
 }
 
 // embedRuntime implements Runtime
@@ -307,4 +310,21 @@ func (r *embedRuntime) EmbedDim() int {
 // MaxSeqLen returns the maximum sequence length
 func (r *embedRuntime) MaxSeqLen() int {
 	return r.model.Config().MaxSeqLen
+}
+
+// Tokenizer returns the underlying tokenizer
+func (r *embedRuntime) Tokenizer() Tokenizer {
+	return r.model.Tokenizer()
+}
+
+// Tokenizer provides text tokenization capabilities
+type Tokenizer interface {
+	// Encode tokenizes text into token IDs
+	Encode(text string) ([]int, error)
+
+	// Decode converts token IDs back to text
+	Decode(ids []int) (string, error)
+
+	// VocabSize returns the total vocabulary size
+	VocabSize() int
 }
