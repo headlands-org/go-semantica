@@ -170,16 +170,14 @@ func embedIcons(icons []iconRecord) ([][]float32, error) {
 			end = len(icons)
 		}
 		batch := icons[start:end]
-		inputs := make([]semantica.Input, len(batch))
+		docs := make([]semantica.Document, len(batch))
 		for i, icon := range batch {
-			inputs[i] = semantica.Input{
-				Task:    semantica.TaskSearchDocument,
+			docs[i] = semantica.Document{
 				Title:   icon.Title,
 				Content: icon.Description,
-				Dim:     dim,
 			}
 		}
-		out, err := rt.EmbedInputs(ctx, inputs)
+		out, err := rt.EmbedDocuments(ctx, docs, semantica.Dimensions(dim))
 		if err != nil {
 			return nil, err
 		}

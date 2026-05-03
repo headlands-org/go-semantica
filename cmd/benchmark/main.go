@@ -315,16 +315,12 @@ func runBatchMode(rt *semantica.Runtime) (int, time.Duration, time.Duration) {
 		default:
 		}
 
-		inputs := make([]semantica.Input, *batchSize)
+		texts := make([]string, *batchSize)
 		for i := 0; i < *batchSize; i++ {
-			inputs[i] = semantica.Input{
-				Task:    semantica.TaskNone,
-				Content: testTexts[rand.Intn(len(testTexts))],
-				Dim:     *embedDim,
-			}
+			texts[i] = testTexts[rand.Intn(len(testTexts))]
 		}
 
-		_, err := rt.EmbedInputs(ctx, inputs)
+		_, err := rt.Embed(ctx, texts, semantica.TaskNone, semantica.Dimensions(*embedDim))
 		if err != nil {
 			if ctx.Err() != nil {
 				return computeReturn(totalEmbeddings)
@@ -333,7 +329,7 @@ func runBatchMode(rt *semantica.Runtime) (int, time.Duration, time.Duration) {
 			continue
 		}
 
-		totalEmbeddings += len(inputs)
+		totalEmbeddings += len(texts)
 	}
 }
 
@@ -421,11 +417,7 @@ func worker(ctx context.Context, workerID int, wg *sync.WaitGroup, results chan<
 		text := testTexts[rand.Intn(len(testTexts))]
 
 		// Generate single embedding without modifying the content.
-		_, err := rt.EmbedSingleInput(ctx, semantica.Input{
-			Task:    semantica.TaskNone,
-			Content: text,
-			Dim:     *embedDim,
-		})
+		_, err := rt.EmbedSingle(ctx, text, semantica.TaskNone, semantica.Dimensions(*embedDim))
 		if err != nil {
 			// Check if error is due to context cancellation
 			if ctx.Err() != nil {
@@ -541,19 +533,11 @@ func measureIdleMemory(rt *semantica.Runtime) uint64 {
 	return m.HeapAlloc
 }
 
-func documentInput(content string) semantica.Input {
-	return semantica.Input{
-		Task:    semantica.TaskNone,
-		Content: content,
-		Dim:     *embedDim,
-	}
-}
-
 // warmup runs warmup embeddings to warm up caches
 func warmup(rt *semantica.Runtime, doc string) {
 	ctx := context.Background()
 	for i := 0; i < 5; i++ {
-		_, _ = rt.EmbedSingleInput(ctx, documentInput(doc))
+		_, _ = rt.EmbedSingle(ctx, doc, semantica.TaskNone, semantica.Dimensions(*embedDim))
 	}
 }
 
@@ -600,12 +584,10 @@ func measureSingleDocLatency(rt *semantica.Runtime, doc string) LatencyStats {
 	latencies := make([]float64, numRuns)
 	compute := make([]float64, numRuns)
 
-	input := documentInput(doc)
-
 	for i := 0; i < numRuns; i++ {
 		cpuBefore := cpuTimeNow()
 		start := time.Now()
-		_, err := rt.EmbedSingleInput(ctx, input)
+		_, err := rt.EmbedSingle(ctx, doc, semantica.TaskNone, semantica.Dimensions(*embedDim))
 		cpuAfter := cpuTimeNow()
 		if err != nil {
 			log.Printf("Warning: embedding failed during latency test: %v", err)
@@ -670,20 +652,20 @@ func measureThroughput(rt *semantica.Runtime, docs []string, batchSizeOverride i
 	totalEmbeddings := 0
 
 	for time.Now().Before(deadline) {
-		// Select batch-size random texts from docs and build document prompts.
-		inputs := make([]semantica.Input, batchSizeOverride)
+		// Select batch-size random texts from docs.
+		texts := make([]string, batchSizeOverride)
 		for i := 0; i < batchSizeOverride; i++ {
-			inputs[i] = documentInput(docs[rand.Intn(len(docs))])
+			texts[i] = docs[rand.Intn(len(docs))]
 		}
 
 		// Generate embeddings
-		_, err := rt.EmbedInputs(ctx, inputs)
+		_, err := rt.Embed(ctx, texts, semantica.TaskNone, semantica.Dimensions(*embedDim))
 		if err != nil {
 			log.Printf("Warning: embedding failed during throughput test: %v", err)
 			continue
 		}
 
-		totalEmbeddings += len(inputs)
+		totalEmbeddings += len(texts)
 	}
 
 	actualDuration := time.Since(startTime).Seconds()
@@ -885,12 +867,10 @@ func measureSingleDocLatencyPrecise(rt *semantica.Runtime, doc string, numRuns i
 	latencies := make([]float64, numRuns)
 	compute := make([]float64, numRuns)
 
-	input := documentInput(doc)
-
 	for i := 0; i < numRuns; i++ {
 		cpuBefore := cpuTimeNow()
 		start := time.Now()
-		_, err := rt.EmbedSingleInput(ctx, input)
+		_, err := rt.EmbedSingle(ctx, doc, semantica.TaskNone, semantica.Dimensions(*embedDim))
 		cpuAfter := cpuTimeNow()
 		if err != nil {
 			log.Printf("Warning: embedding failed during latency test: %v", err)

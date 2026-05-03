@@ -100,16 +100,14 @@ func main() {
 				end = len(icons)
 			}
 			batch := icons[start:end]
-			inputs := make([]semantica.Input, len(batch))
+			docs := make([]semantica.Document, len(batch))
 			for i, icon := range batch {
-				inputs[i] = semantica.Input{
-					Task:    semantica.TaskSearchDocument,
+				docs[i] = semantica.Document{
 					Title:   icon.Title,
 					Content: icon.Description,
-					Dim:     *dim,
 				}
 			}
-			vectors, err := rt.EmbedInputs(ctx, inputs)
+			vectors, err := rt.EmbedDocuments(ctx, docs, semantica.Dimensions(*dim))
 			if err != nil {
 				log.Fatalf("embed inputs: %v", err)
 			}
@@ -219,11 +217,7 @@ func main() {
 	}
 
 	queryEmbedStart := time.Now()
-	queryVec, err := rt.EmbedSingleInput(ctx, semantica.Input{
-		Task:    semantica.TaskSearchQuery,
-		Content: *queryText,
-		Dim:     *dim,
-	})
+	queryVec, err := rt.EmbedSingle(ctx, *queryText, semantica.TaskSearchQuery, semantica.Dimensions(*dim))
 	if err != nil {
 		log.Fatalf("embed query: %v", err)
 	}

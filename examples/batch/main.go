@@ -46,19 +46,10 @@ func main() {
 	fmt.Printf("Processing %d texts in batch...\n", len(texts))
 
 	// Generate embeddings in batch using document-optimised prompts.
-	inputs := make([]semantica.Input, len(texts))
-	for i, text := range texts {
-		inputs[i] = semantica.Input{
-			Task:    semantica.TaskSearchDocument,
-			Title:   "none",
-			Content: text,
-		}
-	}
-
 	ctx := context.Background()
 	start := time.Now()
 
-	embeddings, err := rt.EmbedInputs(ctx, inputs)
+	embeddings, err := rt.Embed(ctx, texts, semantica.TaskSearchDocument, semantica.DimensionsAuto)
 	if err != nil {
 		log.Fatalf("Failed to generate batch embeddings: %v", err)
 	}
